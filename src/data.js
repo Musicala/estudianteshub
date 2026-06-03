@@ -157,7 +157,25 @@ function toDateMaybe(value) {
     return Number.isNaN(value.getTime()) ? null : value;
   }
 
-  if (typeof value === "number" || typeof value === "string") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    // Fecha sin hora (YYYY-MM-DD): parsear como fecha LOCAL para no perder un día.
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (dateOnly) {
+      const localDate = new Date(
+        Number(dateOnly[1]),
+        Number(dateOnly[2]) - 1,
+        Number(dateOnly[3])
+      );
+      return Number.isNaN(localDate.getTime()) ? null : localDate;
+    }
+
+    const date = new Date(trimmed);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value === "number") {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
   }
@@ -751,11 +769,14 @@ export async function getStudentsByIds(studentIds = []) {
   estudiante"). Las reglas de Firestore solo permiten esta lectura a admin/teacher.
   Para estudiantes normales esto fallará por permisos, y está bien que así sea.
 */
-export async function listAllStudents(max = 500) {
+export async function listAllStudents(max = 0) {
   try {
-    const cap = clampLimit(max, 500, 2000);
     const studentsRef = collection(db, COLLECTIONS.students);
-    const q = query(studentsRef, limit(cap));
+
+    // max = 0 (por defecto) → trae TODA la colección. La base tiene >1100
+    // estudiantes, así que un tope bajo dejaría a muchos por fuera.
+    const cap = Number(max) > 0 ? clampLimit(max, 1000, 10000) : 0;
+    const q = cap > 0 ? query(studentsRef, limit(cap)) : query(studentsRef);
     const snap = await getDocs(q);
 
     const deduped = dedupeStudents(
@@ -770,6 +791,61 @@ export async function listAllStudents(max = 500) {
     });
   } catch (error) {
     throw withContextError(error, "listAllStudents");
+  }
+}
+
+/*
+  Extrae los estudiantes REFERENCIADOS en bitácoras (por studentIds / studentRefs).
+  Sirve para encontrar estudiantes que tienen clases registradas pero a los que
+  todavía les falta su documento en la colección `students`. Solo admin/teacher
+  pueden leer toda la colección de bitácoras.
+*/
+export async function listStudentRefsFromBitacoras(max = 2000) {
+  try {
+    const cap = clampLimit(max, 2000, 6000);
+    const ref = collection(db, COLLECTIONS.bitacoras);
+    const snap = await getDocs(query(ref, limit(cap)));
+
+    const byId = new Map();
+
+    for (const docItem of snap.docs) {
+      const data = docItem.data() || {};
+
+      const ids = unique([
+        ...safeArray(data.studentIds),
+        ...safeArray(data.students),
+        data.studentId,
+      ].map((id) => safeText(id)));
+
+      const refs = safeArray(data.studentRefs);
+
+      // Nombres explícitos cuando existen
+      for (const r of refs) {
+        const id = safeText(r?.id || r?.studentId);
+        const name = safeText(r?.name || r?.displayName || r?.nombre);
+        if (!id) continue;
+        if (!byId.has(id)) byId.set(id, { id, displayName: name, count: 0 });
+        const entry = byId.get(id);
+        if (!entry.displayName && name) entry.displayName = name;
+        entry.count += 1;
+      }
+
+      for (const id of ids) {
+        if (!id) continue;
+        if (!byId.has(id)) byId.set(id, { id, displayName: "", count: 0 });
+        byId.get(id).count += 1;
+      }
+    }
+
+    return [...byId.values()].map((entry) => ({
+      id: entry.id,
+      studentId: entry.id,
+      displayName: entry.displayName || "Estudiante",
+      bitacoraCount: entry.count,
+      fromBitacoras: true,
+    }));
+  } catch (error) {
+    throw withContextError(error, "listStudentRefsFromBitacoras");
   }
 }
 

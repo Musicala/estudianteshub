@@ -184,7 +184,26 @@ export function toDateMaybe(value) {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  if (typeof value === "string" || typeof value === "number") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    // Fecha sin hora (YYYY-MM-DD): se parsea como fecha LOCAL para evitar que
+    // la zona horaria la mueva un día hacia atrás.
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (dateOnly) {
+      const localDate = new Date(
+        Number(dateOnly[1]),
+        Number(dateOnly[2]) - 1,
+        Number(dateOnly[3])
+      );
+      return Number.isNaN(localDate.getTime()) ? null : localDate;
+    }
+
+    const date = new Date(trimmed);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value === "number") {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
   }

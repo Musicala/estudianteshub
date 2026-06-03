@@ -372,6 +372,7 @@ function setAuthUI(user) {
     if (els.userInitials) els.userInitials.textContent = "U";
     if (els.studentPickerBtn) els.studentPickerBtn.hidden = true;
     if (els.viewAsBtn) els.viewAsBtn.hidden = true;
+    if (els.musiprofeFab) els.musiprofeFab.hidden = true;
     return;
   }
 
@@ -889,13 +890,38 @@ async function ensureAllStudents() {
     throw new Error("DATA_API_MISSING_listAllStudents");
   }
 
-  const students = await api.listAllStudents();
+  // 1) Estudiantes con perfil propio en la colección `students`.
+  const profiled = (await api.listAllStudents()) || [];
 
-  for (const student of students || []) {
+  const knownIds = new Set();
+  for (const student of profiled) {
     cacheStudent(student);
+    for (const alias of [student?.id, student?.studentId, student?.studentKey]) {
+      const clean = safeText(alias);
+      if (clean) knownIds.add(clean);
+    }
   }
 
-  state.allStudents = students || [];
+  // 2) Estudiantes que aparecen en bitácoras pero NO tienen perfil todavía.
+  let orphans = [];
+  if (typeof api.listStudentRefsFromBitacoras === "function") {
+    try {
+      const fromBitacoras = (await api.listStudentRefsFromBitacoras()) || [];
+      orphans = fromBitacoras.filter((ref) => !knownIds.has(safeText(ref.id)));
+
+      for (const orphan of orphans) {
+        cacheStudent(orphan);
+      }
+    } catch (error) {
+      console.warn("[App] No se pudieron leer estudiantes desde bitácoras:", error);
+    }
+  }
+
+  const merged = [...profiled, ...orphans].sort((a, b) =>
+    getStudentName(a, "").localeCompare(getStudentName(b, ""), "es")
+  );
+
+  state.allStudents = merged;
   return state.allStudents;
 }
 
@@ -938,7 +964,12 @@ function renderViewAsListHTML(students = [], filter = "") {
       if (!id) return "";
 
       const name = escapeHtml(getStudentName(student, "Estudiante"));
-      const meta = escapeHtml(getStudentMeta(student) || "Perfil de aprendizaje");
+      const isOrphan = Boolean(student?.fromBitacoras);
+      const meta = escapeHtml(
+        isOrphan
+          ? "⚠ Tiene clases registradas pero le falta crear su perfil"
+          : getStudentMeta(student) || "Perfil de aprendizaje"
+      );
 
       return `
         <button class="pick-item" type="button" data-view-as-id="${escapeHtml(id)}">
@@ -1086,6 +1117,17 @@ function setViewAsButtonVisibility() {
   els.viewAsBtn.hidden = !(Boolean(state.user) && isInternalUser());
 }
 
+function setMusiprofeFabVisibility() {
+  if (!els.musiprofeFab) return;
+
+  const showPortal =
+    Boolean(state.user) &&
+    Boolean(state.studentId) &&
+    Boolean(state.student);
+
+  els.musiprofeFab.hidden = !showPortal;
+}
+
 /* =============================================================================
   Dependencias para vistas
 ============================================================================= */
@@ -1173,8 +1215,7 @@ function renderLoggedOut() {
       </div>
 
       <p class="hero__note">
-        Usa el correo que tengas registrado en Musicala. Sí, el correo correcto,
-        esa criatura escurridiza.
+        Inicia sesión con el mismo correo de Google que registraste en Musicala. 😊
       </p>
     </article>
   `;
@@ -1291,6 +1332,7 @@ async function render(route) {
   setActiveNav(normalizedRoute);
   setBusy(true);
   ensureViewAsBanner();
+  setMusiprofeFabVisibility();
 
   try {
     if (!state.isBooted) {
@@ -1303,8 +1345,8 @@ async function render(route) {
 
     if (state.lastError?.code === "AUTH_TIMEOUT") {
       els.view.innerHTML = renderBootError(
-        "No se pudo confirmar la sesion",
-        state.lastError.message,
+        "No pudimos confirmar tu sesión",
+        "Parece que la conexión está lenta. Revisa tu internet e intenta entrar de nuevo.",
         renderLoginButton()
       );
       return;
@@ -1312,8 +1354,8 @@ async function render(route) {
 
     if (state.lastError?.code === "AUTH_ERROR") {
       els.view.innerHTML = renderBootError(
-        "Error revisando autenticacion",
-        state.lastError.message,
+        "Tuvimos un problema al iniciar sesión",
+        "Intenta entrar otra vez. Si sigue igual, revisa tu conexión a internet.",
         renderLoginButton()
       );
       return;
@@ -1332,7 +1374,7 @@ async function render(route) {
 
       const message =
         state.lastError?.message ||
-        "Tu correo no tiene un estudiante vinculado todavía.";
+        "Tu acceso todavía no está activo. Si acabas de registrarte, dale unos minutos o escríbele a tu profe de Musicala. 🎵";
 
       els.view.innerHTML = renderNoAccess(message);
       return;
@@ -1366,17 +1408,11 @@ async function render(route) {
         <article class="card">
           <div class="card__head">
             <div>
-              <h2 class="card__title">Algo falló cargando esta sección</h2>
+              <h2 class="card__title">Esta sección no cargó bien</h2>
               <p class="card__subtitle">
-                La app está viva, pero esta vista se tropezó. Muy web todo.
+                Puede ser un problema momentáneo de conexión. Intenta de nuevo en unos segundos.
               </p>
             </div>
-          </div>
-
-          <div class="read">
-            <p>
-              ${escapeHtml(error?.message || "Error desconocido")}
-            </p>
           </div>
 
           <div class="card__footer">
@@ -1589,34 +1625,158 @@ async function handleSignedIn(user) {
   } catch (error) {
     console.error("[App] Error cargando contexto de usuario:", error);
 
-    state.lastError = error;
     state.isBooted = true;
 
     const raw = String(error?.code || error?.message || error);
+
+    let friendlyMessage;
 
     if (
       raw.includes("permission") ||
       raw.includes("PERMISSION_DENIED") ||
       raw.includes("Missing or insufficient permissions")
     ) {
-      banner(
-        "No tienes permisos para ver estos datos. Revisa las reglas de Firestore y que tu correo exista en users/{email}.",
-        "danger"
-      );
+      friendlyMessage =
+        "Tu acceso todavía no está activo. Si acabas de registrarte, espera unos minutos; si continúa, escríbele a tu profe o al equipo de Musicala. 🎵";
     } else if (raw.includes("NO_EMAIL_IN_GOOGLE_ACCOUNT")) {
-      banner(
-        "Tu cuenta de Google no entregó un correo válido. Eso es raro, pero aquí estamos.",
-        "danger"
-      );
+      friendlyMessage =
+        "No pudimos leer el correo de tu cuenta de Google. Intenta iniciar sesión de nuevo, idealmente con tu correo de Musicala.";
     } else {
-      banner(
-        "No se pudo cargar tu perfil. Revisa consola y conexión con Firebase.",
-        "danger"
-      );
+      friendlyMessage =
+        "No pudimos cargar tu información. Revisa tu conexión a internet e intenta de nuevo.";
     }
+
+    // Guardamos un mensaje amable para mostrar; el detalle técnico queda en consola.
+    state.lastError = {
+      code: error?.code || "LOAD_ERROR",
+      message: friendlyMessage,
+      technical: raw,
+    };
+
+    banner(friendlyMessage, "danger");
 
     await navigate();
   }
+}
+
+/* =============================================================================
+  Diagnóstico (solo para el equipo Musicala, desde la consola del navegador)
+============================================================================= */
+
+function exposeDiagnostics() {
+  /*
+    Uso: en la consola del navegador, logueado como admin, escribe:
+        await MUSICALA_DIAG.estudiantesSinPerfil()
+    Devuelve y muestra en tabla los estudiantes que tienen clases en bitácoras
+    pero todavía no tienen documento en la colección `students`.
+  */
+  window.MUSICALA_DIAG = {
+    async estudiantesSinPerfil() {
+      if (!isInternalUser()) {
+        console.warn("[DIAG] Solo disponible para admins/equipo Musicala.");
+        return [];
+      }
+
+      const profiled = (await api.listAllStudents()) || [];
+      const knownIds = new Set();
+      for (const s of profiled) {
+        for (const alias of [s?.id, s?.studentId, s?.studentKey]) {
+          const clean = safeText(alias);
+          if (clean) knownIds.add(clean);
+        }
+      }
+
+      const fromBitacoras =
+        typeof api.listStudentRefsFromBitacoras === "function"
+          ? (await api.listStudentRefsFromBitacoras()) || []
+          : [];
+
+      const sinPerfil = fromBitacoras.filter((r) => !knownIds.has(safeText(r.id)));
+
+      console.info(
+        `[DIAG] Con perfil: ${profiled.length} · En bitácoras: ${fromBitacoras.length} · SIN perfil: ${sinPerfil.length}`
+      );
+      console.table(
+        sinPerfil.map((s) => ({
+          id: s.id,
+          nombre: s.displayName,
+          clases: s.bitacoraCount,
+        }))
+      );
+
+      return sinPerfil;
+    },
+
+    /*
+      Uso: await MUSICALA_DIAG.revisarAcceso("correo@ejemplo.com")
+      Revisa el documento users/{correo} y verifica si el vínculo con su(s)
+      estudiante(s) está bien hecho. Ideal para casos como el de un acudiente.
+    */
+    async revisarAcceso(email) {
+      if (!isInternalUser()) {
+        console.warn("[DIAG] Solo disponible para admins/equipo Musicala.");
+        return null;
+      }
+
+      const correo = normalizeEmail(email);
+      if (!correo) {
+        console.warn("[DIAG] Pasa un correo: revisarAcceso('correo@...')");
+        return null;
+      }
+
+      const profile = await api.getAccessProfileByEmail(correo);
+
+      if (!profile) {
+        console.warn(`[DIAG] No existe documento users/${correo}. Hay que crear su acceso.`);
+        return { correo, existe: false };
+      }
+
+      const rolesPermitidos = [
+        "student", "estudiante", "acudiente", "guardian", "parent",
+        "admin", "administrativo", "direccion", "dirección",
+      ];
+
+      const role = safeText(profile.role || profile.rol).toLowerCase();
+      const activo = profile.active !== false && profile.estado !== "inactivo";
+      const ids = extractStudentIdsFromAccessProfile(profile);
+
+      const vinculos = [];
+      for (const id of ids) {
+        const student = await api.getStudent(id).catch(() => null);
+        vinculos.push({
+          studentId: id,
+          existeEnStudents: Boolean(student),
+          nombre: student ? getStudentName(student) : "(no encontrado)",
+        });
+      }
+
+      const reporte = {
+        correo,
+        existe: true,
+        role: role || "(vacío)",
+        rolPermitido: rolesPermitidos.includes(role),
+        activo,
+        estudiantesVinculados: ids.length,
+        vinculos,
+      };
+
+      console.info("[DIAG] Acceso de", correo);
+      console.table(vinculos);
+      console.info("[DIAG] role:", reporte.role, "· rol permitido:", reporte.rolPermitido, "· activo:", activo, "· #estudiantes:", ids.length);
+
+      if (!ids.length) {
+        console.warn("[DIAG] ⚠ No tiene ningún estudiante vinculado (studentId/studentIds vacío).");
+      }
+      if (role && !reporte.rolPermitido) {
+        console.warn(`[DIAG] ⚠ El rol "${role}" no está habilitado. Usa: estudiante o acudiente.`);
+      }
+      if (!activo) {
+        console.warn("[DIAG] ⚠ El acceso está inactivo (active:false o estado:inactivo).");
+      }
+
+      return reporte;
+    },
+  };
 }
 
 /* =============================================================================
@@ -1644,6 +1804,7 @@ async function boot() {
 
   bindCoreHandlers();
   notifyServiceWorkerReady();
+  exposeDiagnostics();
 
   state.isBooted = false;
 
@@ -1659,7 +1820,7 @@ async function boot() {
     state.lastError = {
       code: "AUTH_TIMEOUT",
       message:
-        "Firebase Auth no respondio a tiempo. Revisa conexion, dominio autorizado y consola.",
+        "La conexión está tardando más de lo normal. Revisa tu internet e intenta de nuevo.",
     };
     state.isBooted = true;
     setBusy(false);
@@ -1695,19 +1856,21 @@ boot().catch((error) => {
   setBusy(false);
 
   banner(
-    "Error fatal iniciando Estudiantes HUB. Revisa consola, imports y archivos conectados.",
+    "No pudimos abrir Estudiantes HUB. Intenta recargar la página.",
     "danger"
   );
 
   if (els.view) {
     els.view.innerHTML = `
       <article class="card">
-        <h1 class="card__title">No se pudo iniciar la app</h1>
+        <h1 class="card__title">No pudimos abrir el portal</h1>
         <p class="card__subtitle">
-          Hay un error en la carga inicial. Revisa consola.
+          Intenta recargar la página. Si el problema sigue, escríbele al equipo de Musicala.
         </p>
-        <div class="read">
-          <p>${escapeHtml(error?.message || "Error desconocido")}</p>
+        <div class="card__footer">
+          <button class="btn btn--primary" type="button" onclick="location.reload()">
+            Recargar
+          </button>
         </div>
       </article>
     `;
