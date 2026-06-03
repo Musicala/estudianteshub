@@ -1971,6 +1971,63 @@ textarea.input {
 }
 
 /* --------------------------------------------------------------------------
+  Banner de instalación (PWA)
+-------------------------------------------------------------------------- */
+
+.install-banner {
+  position: sticky;
+  top: 0;
+  z-index: 75;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md, 16px);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-md, 0 12px 30px rgba(12, 65, 196, 0.18));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.install-banner[hidden] {
+  display: none;
+}
+
+.install-banner__icon img {
+  display: block;
+  border-radius: 11px;
+}
+
+.install-banner__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.install-banner__title {
+  font-size: var(--fs-14, 0.9rem);
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.install-banner__text {
+  font-size: var(--fs-12, 0.8rem);
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.install-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
   Modal
 -------------------------------------------------------------------------- */
 

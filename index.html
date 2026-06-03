@@ -133,6 +133,26 @@
       </div>
     </header>
 
+    <div id="installBanner" class="install-banner" hidden>
+      <div class="install-banner__icon" aria-hidden="true">
+        <img src="./assets/icons/icon-192.png" alt="" width="40" height="40" />
+      </div>
+      <div class="install-banner__copy">
+        <strong class="install-banner__title">Instala Estudiantes HUB</strong>
+        <span id="installBannerText" class="install-banner__text">
+          Tenlo como app en tu pantalla de inicio para entrar más rápido.
+        </span>
+      </div>
+      <div class="install-banner__actions">
+        <button id="installBannerBtn" class="btn btn--primary btn--sm" type="button">
+          Instalar
+        </button>
+        <button id="installBannerClose" class="icon-btn" type="button" aria-label="Cerrar">
+          ×
+        </button>
+      </div>
+    </div>
+
     <main id="appMain" class="main" role="main" tabindex="-1">
       <section
         id="bannerArea"
@@ -346,6 +366,83 @@
           console.warn('[Estudiantes HUB] No se pudo registrar el Service Worker:', error);
         });
       });
+    })();
+  </script>
+
+  <!-- Instalación PWA: banner propio para Android y guía para iPhone -->
+  <script>
+    (() => {
+      const banner = document.getElementById('installBanner');
+      const btn = document.getElementById('installBannerBtn');
+      const closeBtn = document.getElementById('installBannerClose');
+      const textEl = document.getElementById('installBannerText');
+      if (!banner || !btn) return;
+
+      const DISMISS_KEY = 'musicala.estudiantesHub.installDismissedAt';
+      const DISMISS_DAYS = 7;
+
+      const isStandalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true;
+
+      const ua = window.navigator.userAgent || '';
+      const isIOS = /iphone|ipad|ipod/i.test(ua) && !window.MSStream;
+
+      let deferredPrompt = null;
+
+      function recentlyDismissed() {
+        try {
+          const ts = Number(localStorage.getItem(DISMISS_KEY) || 0);
+          if (!ts) return false;
+          return (Date.now() - ts) < DISMISS_DAYS * 24 * 60 * 60 * 1000;
+        } catch { return false; }
+      }
+
+      function show() { banner.hidden = false; }
+      function hide() { banner.hidden = true; }
+
+      function dismiss() {
+        hide();
+        try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch {}
+      }
+
+      // Ya instalada o el usuario la cerró hace poco: no molestar.
+      if (isStandalone || recentlyDismissed()) return;
+
+      // Android / Chrome: el navegador nos deja disparar el instalador nativo.
+      window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        deferredPrompt = event;
+        show();
+      });
+
+      btn.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          try { await deferredPrompt.userChoice; } catch {}
+          deferredPrompt = null;
+          hide();
+        } else if (isIOS) {
+          // iPhone no permite instalador automático: mostramos la guía.
+          textEl.innerHTML =
+            'Toca el botón <strong>Compartir</strong> (cuadro con flecha ↑) y elige ' +
+            '<strong>“Agregar a inicio”</strong>.';
+          btn.hidden = true;
+        }
+      });
+
+      closeBtn?.addEventListener('click', dismiss);
+
+      // Cuando se instala con éxito, ocultamos y no volvemos a molestar.
+      window.addEventListener('appinstalled', dismiss);
+
+      // iPhone (Safari): no hay beforeinstallprompt, así que mostramos el banner
+      // con la instrucción manual.
+      if (isIOS) {
+        textEl.textContent =
+          'Tócame para ver cómo agregar Estudiantes HUB a tu pantalla de inicio.';
+        show();
+      }
     })();
   </script>
 </body>
