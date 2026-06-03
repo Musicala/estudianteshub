@@ -2028,6 +2028,42 @@ textarea.input {
 }
 
 /* --------------------------------------------------------------------------
+  Badges de acceso (Ver como estudiante)
+-------------------------------------------------------------------------- */
+
+.pick-item__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.login-badge {
+  flex-shrink: 0;
+  font-size: var(--fs-11, 0.72rem);
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.login-badge--ok {
+  color: #0a7d3c;
+  background: rgba(16, 160, 80, 0.13);
+}
+
+.login-badge--no {
+  color: var(--danger, #c92a2a);
+  background: rgba(201, 42, 42, 0.12);
+}
+
+.login-badge--warn {
+  color: #9a6700;
+  background: rgba(214, 158, 0, 0.16);
+}
+
+/* --------------------------------------------------------------------------
   Modal
 -------------------------------------------------------------------------- */
 

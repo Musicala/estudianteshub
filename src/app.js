@@ -243,6 +243,46 @@ function getStudentMeta(student = null) {
     .join(" · ");
 }
 
+function getStudentStatusText(student = null) {
+  return safeText(
+    student?.estado ||
+      student?.status ||
+      student?.estadoActual ||
+      student?.studentStatus
+  );
+}
+
+/*
+  Misma política que las reglas de Firestore / el sync:
+  pueden entrar al HUB los "Activo*" y los "Inactivo en pausa (1-3 meses)".
+  La pausa de 3-6 meses (o más larga) NO entra.
+*/
+function canStudentLogIn(student = null) {
+  const s = getStudentStatusText(student)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[‐-―−]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!s) return false;
+
+  if (
+    s === "activo" ||
+    s.startsWith("activo no registro") ||
+    s.startsWith("activo en pausa")
+  ) {
+    return true;
+  }
+
+  if (s.startsWith("inactivo en pausa")) {
+    return /1\s*-\s*3/.test(s) || /1\s+a\s+3/.test(s);
+  }
+
+  return false;
+}
+
 function persistActiveStudentId(studentId) {
   try {
     if (!studentId) {
@@ -965,20 +1005,50 @@ function renderViewAsListHTML(students = [], filter = "") {
 
       const name = escapeHtml(getStudentName(student, "Estudiante"));
       const isOrphan = Boolean(student?.fromBitacoras);
-      const meta = escapeHtml(
-        isOrphan
-          ? "⚠ Tiene clases registradas pero le falta crear su perfil"
-          : getStudentMeta(student) || "Perfil de aprendizaje"
-      );
+      const status = getStudentStatusText(student);
+      const allowed = canStudentLogIn(student);
+
+      let meta;
+      let badge;
+
+      if (isOrphan) {
+        meta = "⚠ Tiene clases pero le falta crear su perfil";
+        badge = `<span class="login-badge login-badge--warn">sin perfil</span>`;
+      } else {
+        const statusLabel = status ? `${status} · ` : "";
+        meta = `${statusLabel}${getStudentMeta(student) || "Perfil de aprendizaje"}`;
+        badge = allowed
+          ? `<span class="login-badge login-badge--ok">✓ puede entrar</span>`
+          : `<span class="login-badge login-badge--no">⛔ no entra</span>`;
+      }
 
       return `
         <button class="pick-item" type="button" data-view-as-id="${escapeHtml(id)}">
-          <div class="pick-item__title">${name}</div>
-          <div class="pick-item__meta">${meta}</div>
+          <div class="pick-item__row">
+            <div class="pick-item__title">${name}</div>
+            ${badge}
+          </div>
+          <div class="pick-item__meta">${escapeHtml(meta)}</div>
         </button>
       `;
     })
     .join("");
+}
+
+function renderViewAsSummary(students = []) {
+  const profiled = students.filter((s) => !s?.fromBitacoras);
+  const canEnter = profiled.filter((s) => canStudentLogIn(s)).length;
+  const cannot = profiled.length - canEnter;
+  const orphans = students.length - profiled.length;
+
+  return `
+    <p class="note">
+      <strong>${canEnter}</strong> pueden entrar al HUB ·
+      <strong>${cannot}</strong> no (por su estado)${
+        orphans ? ` · <strong>${orphans}</strong> sin perfil` : ""
+      }
+    </p>
+  `;
 }
 
 async function openViewAsPicker() {
@@ -1000,6 +1070,7 @@ async function openViewAsPicker() {
           autocomplete="off"
           aria-label="Buscar estudiante"
         />
+        <div id="viewAsSummary"></div>
         <div id="viewAsList" class="pick-list">
           <p class="note">Cargando estudiantes…</p>
         </div>
@@ -1012,9 +1083,14 @@ async function openViewAsPicker() {
 
   const listEl = $("#viewAsList");
   const searchEl = $("#viewAsSearch");
+  const summaryEl = $("#viewAsSummary");
 
   try {
     const students = await ensureAllStudents();
+
+    if (summaryEl) {
+      summaryEl.innerHTML = renderViewAsSummary(students);
+    }
 
     if (listEl) {
       listEl.innerHTML = renderViewAsListHTML(students);
@@ -1750,9 +1826,17 @@ function exposeDiagnostics() {
         });
       }
 
+      // CLAVE: las reglas de Firestore buscan el documento por ID = correo.
+      // Si el doc existe con OTRO id (y solo coincide por el campo email),
+      // las reglas no lo encuentran y rechazan al estudiante.
+      const docId = safeText(profile.id);
+      const docIdEsCorreo = normalizeEmail(docId) === correo;
+
       const reporte = {
         correo,
         existe: true,
+        docId,
+        docIdEsCorreo,
         role: role || "(vacío)",
         rolPermitido: rolesPermitidos.includes(role),
         activo,
@@ -1762,8 +1846,12 @@ function exposeDiagnostics() {
 
       console.info("[DIAG] Acceso de", correo);
       console.table(vinculos);
+      console.info("[DIAG] docId:", docId, "· docId == correo:", docIdEsCorreo);
       console.info("[DIAG] role:", reporte.role, "· rol permitido:", reporte.rolPermitido, "· activo:", activo, "· #estudiantes:", ids.length);
 
+      if (!docIdEsCorreo) {
+        console.warn("[DIAG] ⛔ CAUSA PROBABLE: el ID del documento NO es el correo. Las reglas no lo encuentran. Hay que recrear el acceso con ID = correo (re-sincronizar suele arreglarlo).");
+      }
       if (!ids.length) {
         console.warn("[DIAG] ⚠ No tiene ningún estudiante vinculado (studentId/studentIds vacío).");
       }
