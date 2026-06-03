@@ -1,0 +1,100 @@
+{
+  "name": "Estudiantes HUB · Musicala",
+  "short_name": "Estudiantes HUB",
+  "description": "Portal de estudiantes Musicala para consultar ruta de aprendizaje, bitácoras de clase, recursos, avances y eventos.",
+  "id": "/",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "portrait-primary",
+  "background_color": "#F7F8FC",
+  "theme_color": "#FFFFFF",
+  "categories": ["education", "music", "productivity"],
+  "lang": "es-CO",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "./assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./assets/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "./assets/screenshots/home-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Inicio del portal estudiantil"
+    },
+    {
+      "src": "./assets/screenshots/home-desktop.png",
+      "sizes": "1440x900",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Vista de escritorio del portal estudiantil"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mi ruta",
+      "short_name": "Ruta",
+      "description": "Ver la ruta de aprendizaje del estudiante.",
+      "url": "./index.html#/route",
+      "icons": [
+        {
+          "src": "./assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Bitácora",
+      "short_name": "Bitácora",
+      "description": "Consultar las bitácoras de clase del estudiante.",
+      "url": "./index.html#/journal",
+      "icons": [
+        {
+          "src": "./assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Recursos",
+      "short_name": "Recursos",
+      "description": "Abrir recursos de estudio recomendados.",
+      "url": "./index.html#/resources",
+      "icons": [
+        {
+          "src": "./assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

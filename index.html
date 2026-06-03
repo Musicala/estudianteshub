@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+  <meta charset="utf-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+
+  <title>Estudiantes HUB · Musicala</title>
+
+  <meta
+    name="description"
+    content="Portal de estudiantes Musicala: ruta de aprendizaje, bitácoras de clase, recursos, avances y eventos."
+  />
+
+  <meta name="application-name" content="Estudiantes HUB · Musicala" />
+  <meta name="apple-mobile-web-app-title" content="Estudiantes HUB" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="color-scheme" content="light" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+  <!-- Iconos -->
+  <link rel="icon" href="./assets/icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="./assets/icons/icon-192.png" />
+
+  <!-- Fuentes -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <a class="skip-link" href="#appMain">
+    Saltar al contenido principal
+  </a>
+
+  <div class="app-shell" id="appShell">
+    <div class="app-bg" aria-hidden="true">
+      <div class="app-bg__blob app-bg__blob--one"></div>
+      <div class="app-bg__blob app-bg__blob--two"></div>
+      <div class="app-bg__grid"></div>
+    </div>
+
+    <header class="topbar" role="banner">
+      <div class="topbar__inner">
+        <a class="brand" href="#/home" aria-label="Ir al inicio de Estudiantes HUB">
+          <span class="brand__logo-wrap">
+            <img
+              class="brand__logo"
+              src="./assets/logo.png"
+              alt="Musicala"
+              width="48"
+              height="48"
+              loading="eager"
+              decoding="async"
+              onerror="this.closest('.brand__logo-wrap').classList.add('is-fallback')"
+            />
+            <span class="brand__fallback" aria-hidden="true">M</span>
+          </span>
+
+          <span class="brand__copy">
+            <span class="brand__eyebrow">Musicala</span>
+            <span class="brand__title">Estudiantes HUB</span>
+          </span>
+        </a>
+
+        <div class="topbar__actions">
+          <button
+            id="viewAsBtn"
+            class="btn btn--ghost btn--sm"
+            type="button"
+            aria-label="Ver el portal como un estudiante"
+            aria-haspopup="dialog"
+            hidden
+          >
+            <span aria-hidden="true">👁️</span>
+            <span>Ver como estudiante</span>
+          </button>
+
+          <button
+            id="studentPickerBtn"
+            class="student-chip"
+            type="button"
+            aria-label="Cambiar estudiante"
+            aria-haspopup="dialog"
+            hidden
+          >
+            <span class="student-chip__avatar" aria-hidden="true">♪</span>
+            <span class="student-chip__text">
+              <span class="student-chip__label">Estudiante</span>
+              <span id="studentPickerLabel" class="student-chip__name">Seleccionar</span>
+            </span>
+            <span class="student-chip__chevron" aria-hidden="true">⌄</span>
+          </button>
+
+          <div class="authbar" role="group" aria-label="Cuenta de usuario">
+            <button id="btnLogin" class="btn btn--primary" type="button">
+              <span aria-hidden="true">✦</span>
+              <span>Entrar con Google</span>
+            </button>
+
+            <div id="userBadge" class="user-badge" hidden>
+              <div id="userAvatar" class="user-badge__avatar" aria-hidden="true">
+                <span id="userInitials">U</span>
+              </div>
+
+              <div class="user-badge__meta">
+                <span id="userName" class="user-badge__name">Usuario</span>
+                <span id="userEmail" class="user-badge__email">correo@dominio.com</span>
+              </div>
+            </div>
+
+            <button id="btnLogout" class="btn btn--ghost" type="button" hidden>
+              Salir
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main id="appMain" class="main" role="main" tabindex="-1">
+      <section
+        id="bannerArea"
+        class="banner-area"
+        aria-live="polite"
+        aria-atomic="true"
+      ></section>
+
+      <section
+        id="view"
+        class="view"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <article class="hero-card hero-card--loading" role="status" aria-label="Cargando portal">
+          <div class="hero-card__badge">
+            <span aria-hidden="true">🎵</span>
+            <span>Preparando tu espacio</span>
+          </div>
+
+          <h1 class="hero-card__title">
+            Cargando Estudiantes HUB…
+          </h1>
+
+          <p class="hero-card__text">
+            Estamos conectando tu perfil, tu ruta de aprendizaje y tus bitácoras de clase.
+          </p>
+
+          <div class="loading-stack" aria-hidden="true">
+            <div class="skeleton skeleton--title"></div>
+            <div class="skeleton skeleton--line"></div>
+            <div class="skeleton skeleton--line skeleton--short"></div>
+          </div>
+        </article>
+
+        <noscript>
+          <article class="card">
+            <h2>Necesitas activar JavaScript</h2>
+            <p>
+              Este portal funciona como una app web. Activa JavaScript en tu navegador
+              para poder iniciar sesión y ver tu información.
+            </p>
+          </article>
+        </noscript>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" role="navigation" aria-label="Secciones del portal">
+      <a
+        class="bottom-nav__item"
+        href="#/home"
+        data-route="home"
+        aria-label="Ir al inicio"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">⌂</span>
+        <span class="bottom-nav__text">Inicio</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/route"
+        data-route="route"
+        aria-label="Ver mi ruta de aprendizaje"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">◇</span>
+        <span class="bottom-nav__text">Mi ruta</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/routine"
+        data-route="routine"
+        aria-label="Ver mi rutina semanal"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">⊞</span>
+        <span class="bottom-nav__text">Rutina</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/practice"
+        data-route="practice"
+        aria-label="Diario de práctica"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">⊙</span>
+        <span class="bottom-nav__text">Diario</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/messages"
+        data-route="messages"
+        aria-label="Mensajes con tu docente"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">✉</span>
+        <span class="bottom-nav__text">Mensajes</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/journal"
+        data-route="journal"
+        aria-label="Ver mis bitácoras de clase"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">✎</span>
+        <span class="bottom-nav__text">Bitácora</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/resources"
+        data-route="resources"
+        aria-label="Ver recursos de estudio"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">▦</span>
+        <span class="bottom-nav__text">Recursos</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/events"
+        data-route="events"
+        aria-label="Ver eventos y muestras"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">◷</span>
+        <span class="bottom-nav__text">Eventos</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/profile"
+        data-route="profile"
+        aria-label="Ver mi perfil"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">◎</span>
+        <span class="bottom-nav__text">Perfil</span>
+      </a>
+    </nav>
+
+    <a
+      id="musiprofeFab"
+      class="musiprofe-fab"
+      href="#/musiprofe"
+      data-route="musiprofe"
+      aria-label="Abrir MusiProfe, tu asistente musical"
+      title="MusiProfe"
+      hidden
+    >
+      <span class="musiprofe-fab__icon" aria-hidden="true">✦</span>
+      <span class="musiprofe-fab__text">MusiProfe</span>
+    </a>
+  </div>
+
+  <div id="modalRoot" class="modal-root" hidden>
+    <div
+      class="modal-backdrop"
+      data-close="true"
+      aria-hidden="true"
+    ></div>
+
+    <section
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modalTitle"
+      aria-describedby="modalSubtitle"
+      tabindex="-1"
+    >
+      <header class="modal__head">
+        <div class="modal__titles">
+          <h2 id="modalTitle" class="modal__title">Detalle</h2>
+          <p id="modalSubtitle" class="modal__subtitle">
+            Información del portal
+          </p>
+        </div>
+
+        <button
+          class="icon-btn"
+          type="button"
+          aria-label="Cerrar ventana"
+          data-close="true"
+        >
+          ×
+        </button>
+      </header>
+
+      <div id="modalBody" class="modal__body"></div>
+      <footer id="modalFoot" class="modal__foot"></footer>
+    </section>
+  </div>
+
+  <div
+    id="toastRoot"
+    class="toast-root"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
+
+  <script type="module" src="./src/app.js"></script>
+
+  <script>
+    (() => {
+      const canUseServiceWorker =
+        'serviceWorker' in navigator &&
+        (location.protocol === 'https:' || location.hostname === 'localhost');
+
+      if (!canUseServiceWorker) return;
+
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch((error) => {
+          console.warn('[Estudiantes HUB] No se pudo registrar el Service Worker:', error);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
