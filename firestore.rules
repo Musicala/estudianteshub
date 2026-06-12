@@ -133,16 +133,7 @@ service cloud.firestore {
     }
 
     match /users/{emailKey} {
-      // Lectura directa del propio documento, tolerante a mayúsculas/minúsculas
-      // entre el correo del token y el ID del documento.
-      allow get: if isAdmin() ||
-        (isSignedIn() && authEmail().lower() == emailKey.lower());
-      // Consulta de respaldo: el usuario puede buscar SOLO documentos cuyo
-      // campo email/correo sea exactamente su propio correo autenticado
-      // (en minúsculas, que es como consulta Estudiantes HUB).
-      allow list: if isAdmin() ||
-        (isSignedIn() && resource.data.email == authEmail().lower()) ||
-        (isSignedIn() && resource.data.correo == authEmail().lower());
+      allow read: if isAdmin() || (isSignedIn() && authEmail() == emailKey);
       allow create, update, delete: if isAdmin();
     }
 

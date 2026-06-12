@@ -101,7 +101,7 @@ function unique(array = []) {
 }
 
 function normalizeEmail(email = "") {
-  return safeText(email).toLowerCase();
+  return safeText(email).replace(/\s+/g, "").toLowerCase();
 }
 
 function getStudentIdentity(student = null) {
@@ -598,12 +598,20 @@ export async function getAccessProfileByEmail(email) {
     assertNonEmptyString(normalizedEmail, "email");
 
     /*
-      En `users` un mismo correo puede tener VARIOS documentos:
-      - el histórico con ID = correo (a veces desactualizado / inactivo)
-      - los del sync de la hoja con ID tipo "student_stu_..."
-      Por eso reunimos todos los candidatos y elegimos el mejor, en vez de
-      quedarnos con el primero que aparezca.
+      El doc canónico es users/{correo en minúsculas, sin espacios}: el sync
+      de Bitácoras lo mantiene con role, active y studentIds ya fusionados.
+      Si existe, es autoritativo. El resto de búsquedas queda solo como
+      respaldo transitorio mientras se termina la limpieza de docs legados.
     */
+    const directSnap = await getDoc(doc(db, COLLECTIONS.users, normalizedEmail));
+    if (directSnap.exists()) {
+      return normalizeAccessProfile({
+        id: directSnap.id,
+        ...directSnap.data(),
+        email: normalizedEmail,
+      });
+    }
+
     const candidates = [];
     const seenIds = new Set();
 
@@ -612,9 +620,6 @@ export async function getAccessProfileByEmail(email) {
       seenIds.add(id);
       candidates.push({ id, ...data });
     };
-
-    const directSnap = await getDoc(doc(db, COLLECTIONS.users, normalizedEmail));
-    if (directSnap.exists()) addCandidate(directSnap.id, directSnap.data());
 
     // Por si el doc fue creado con el correo sin normalizar (mayúsculas, etc.)
     const rawEmail = safeText(email);
@@ -740,8 +745,13 @@ export async function ensureUserDoc(user) {
 
 export async function updateUserCtx(emailOrId, patch = {}) {
   try {
-    const id = safeText(emailOrId);
+    // Solo se escribe el doc canónico users/{correo}; IDs no-correo crearían
+    // de nuevo los documentos duplicados que ya se migraron.
+    const id = normalizeEmail(emailOrId);
     assertNonEmptyString(id, "emailOrId");
+    if (!id.includes("@")) {
+      throw new Error("updateUserCtx requiere un correo como identificador.");
+    }
 
     const ref = doc(db, COLLECTIONS.users, id);
     const cleanPatch = removeUndefinedFields({

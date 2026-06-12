@@ -76,7 +76,7 @@ export function uniqueArray(values = []) {
 }
 
 export function normalizeEmail(email = "") {
-  return safeText(email).toLowerCase();
+  return safeText(email).replace(/\s+/g, "").toLowerCase();
 }
 
 export function normalizeKey(value = "") {
