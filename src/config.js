@@ -68,6 +68,26 @@ export const FIREBASE_CONFIG = Object.freeze({
 */
 export const firebaseConfig = FIREBASE_CONFIG;
 
+/* =============================================================================
+  Firebase secundario — Biblioteca de recursos
+  Proyecto: biblioteca-guitarra-fa182
+  La sección "Recursos" se carga desde este proyecto, filtrada por el área
+  a la que está inscrito el estudiante.
+============================================================================= */
+
+export const LIBRARY_FIREBASE_CONFIG = Object.freeze({
+  apiKey: "AIzaSyD8p1Ges94PMBPE-wuFVjeE5uGzeUQYBS0",
+  authDomain: "biblioteca-guitarra-fa182.firebaseapp.com",
+  projectId: "biblioteca-guitarra-fa182",
+  storageBucket: "biblioteca-guitarra-fa182.firebasestorage.app",
+  messagingSenderId: "803045423554",
+  appId: "1:803045423554:web:9bd5bda0d45f9e33f07e5b",
+});
+
+export const LIBRARY_COLLECTIONS = Object.freeze({
+  resources: "recursos",
+});
+
 export const FIREBASE_OPTIONS = Object.freeze({
   sdkVersion: "10.12.5",
   useEmulators: false,

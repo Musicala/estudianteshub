@@ -37,6 +37,7 @@ import {
 import {
   CONFIG,
   FIREBASE_CONFIG,
+  LIBRARY_FIREBASE_CONFIG,
   firebaseConfig,
   assertFirebaseConfig,
 } from "./config.js";
@@ -84,6 +85,24 @@ export const app = initFirebaseApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+/* =============================================================================
+  App secundaria — Biblioteca de recursos (biblioteca-guitarra-fa182)
+============================================================================= */
+
+function initLibraryApp() {
+  const existing = getApps().find((item) => item.name === "biblioteca");
+  if (existing) return existing;
+
+  return initializeApp(LIBRARY_FIREBASE_CONFIG, "biblioteca");
+}
+
+export const libraryApp = initLibraryApp();
+export const libraryDb = getFirestore(libraryApp);
+
+export function getLibraryDb() {
+  return libraryDb;
+}
 
 /* =============================================================================
   Compatibilidad

@@ -133,7 +133,16 @@ service cloud.firestore {
     }
 
     match /users/{emailKey} {
-      allow read: if isAdmin() || (isSignedIn() && authEmail() == emailKey);
+      // Lectura directa del propio documento, tolerante a mayúsculas/minúsculas
+      // entre el correo del token y el ID del documento.
+      allow get: if isAdmin() ||
+        (isSignedIn() && authEmail().lower() == emailKey.lower());
+      // Consulta de respaldo: el usuario puede buscar SOLO documentos cuyo
+      // campo email/correo sea exactamente su propio correo autenticado
+      // (en minúsculas, que es como consulta Estudiantes HUB).
+      allow list: if isAdmin() ||
+        (isSignedIn() && resource.data.email == authEmail().lower()) ||
+        (isSignedIn() && resource.data.correo == authEmail().lower());
       allow create, update, delete: if isAdmin();
     }
 
@@ -166,6 +175,13 @@ service cloud.firestore {
     match /students/{studentId} {
       allow read: if isAdmin() || isTeacher() || studentOwnsStudentDoc();
       allow create, update, delete: if isAdmin();
+    }
+
+    // Observaciones internas privadas: SOLO equipo (admin/docente).
+    // Nunca legibles por estudiantes/acudientes para evitar filtraciones.
+    match /student_private_notes/{studentId} {
+      allow read: if isAdmin() || isTeacher();
+      allow create, update, delete: if isAdmin() || isTeacher();
     }
 
     match /student_comments/{commentId} {

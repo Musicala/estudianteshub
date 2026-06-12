@@ -42,10 +42,11 @@ import {
   deleteObject,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
-import { db, storage } from "./firebase.js";
+import { db, storage, libraryDb } from "./firebase.js";
 
 import {
   COLLECTIONS,
+  LIBRARY_COLLECTIONS,
   DOCS,
   LIMITS,
   SORTING,
@@ -480,6 +481,23 @@ export function normalizeStudentRoute(raw = null) {
 export function normalizeResource(raw = null) {
   if (!raw) return null;
 
+  /*
+    Soporta tanto el esquema antiguo (resources del proyecto principal)
+    como el de la biblioteca (recursos en biblioteca-guitarra-fa182):
+    titulo, descripcion, area, tema, tipo, estado, etiquetas, enlaces[{url, titulo, tipo}].
+  */
+
+  const links = safeArray(raw.enlaces || raw.links)
+    .map((link) => ({
+      url: safeText(link?.url || link?.href),
+      title: safeText(link?.titulo || link?.title),
+      type: safeText(link?.tipo || link?.type),
+      thumbnail: safeText(link?.thumbnail),
+    }))
+    .filter((link) => link.url);
+
+  const mainUrl = raw.url || raw.link || raw.href || links[0]?.url || "";
+
   return {
     ...raw,
     id: raw.id,
@@ -497,16 +515,24 @@ export function normalizeResource(raw = null) {
     type: raw.type || raw.tipo || "link",
     tipo: raw.tipo || raw.type || "link",
 
-    url: raw.url || raw.link || raw.href || "",
+    tema: safeText(raw.tema),
+    tags: safeArray(raw.etiquetas || raw.tags).map((tag) => safeText(tag)).filter(Boolean),
+
+    url: mainUrl,
+    links,
     visibility: raw.visibility || raw.visibilidad || "students",
 
     area: raw.area || raw.instrument || raw.instrumento || "",
     instrument: raw.instrument || raw.instrumento || raw.area || "",
 
-    active: raw.active !== false && raw.estado !== "inactivo",
+    active:
+      raw.active !== false &&
+      raw.estado !== "inactivo" &&
+      raw.estado !== "borrador" &&
+      raw.estado !== "archivado",
 
-    _createdAt: toDateMaybe(raw.createdAt),
-    _updatedAt: toDateMaybe(raw.updatedAt),
+    _createdAt: toDateMaybe(raw.createdAt || raw.creadoEn),
+    _updatedAt: toDateMaybe(raw.updatedAt || raw.actualizadoEn),
     _publishedAt: toDateMaybe(raw.publishedAt),
   };
 }
@@ -586,28 +612,58 @@ export async function getAccessProfileByEmail(email) {
       Ojalá no, porque eso es pedirle a Firestore que adivine. Pero aquí somos
       compasivos con el pasado.
     */
+    // Reintento directo con el correo tal cual (por si el doc fue creado
+    // con mayúsculas u otro formato antes de normalizar).
+    const rawEmail = safeText(email);
+    if (rawEmail && rawEmail !== normalizedEmail) {
+      const rawSnap = await getDoc(doc(db, COLLECTIONS.users, rawEmail));
+      if (rawSnap.exists()) {
+        return normalizeAccessProfile({
+          id: rawSnap.id,
+          ...rawSnap.data(),
+        });
+      }
+    }
+
     const usersRef = collection(db, COLLECTIONS.users);
     const byEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
     const byCorreoQuery = query(usersRef, where("correo", "==", normalizedEmail), limit(1));
 
-    const emailSnap = await getDocs(byEmailQuery);
+    /*
+      Si las reglas de Firestore bloquean estas consultas (versiones viejas
+      desplegadas), NO debe explotar todo el login: tratamos el bloqueo como
+      "perfil no encontrado" para que el usuario vea el mensaje correcto.
+    */
+    try {
+      const emailSnap = await getDocs(byEmailQuery);
 
-    if (!emailSnap.empty) {
-      const found = emailSnap.docs[0];
-      return normalizeAccessProfile({
-        id: found.id,
-        ...found.data(),
-      });
-    }
+      if (!emailSnap.empty) {
+        const found = emailSnap.docs[0];
+        return normalizeAccessProfile({
+          id: found.id,
+          ...found.data(),
+        });
+      }
 
-    const correoSnap = await getDocs(byCorreoQuery);
+      const correoSnap = await getDocs(byCorreoQuery);
 
-    if (!correoSnap.empty) {
-      const found = correoSnap.docs[0];
-      return normalizeAccessProfile({
-        id: found.id,
-        ...found.data(),
-      });
+      if (!correoSnap.empty) {
+        const found = correoSnap.docs[0];
+        return normalizeAccessProfile({
+          id: found.id,
+          ...found.data(),
+        });
+      }
+    } catch (queryError) {
+      const code = String(queryError?.code || queryError?.message || "");
+      if (code.includes("permission")) {
+        console.warn(
+          "[data] Consulta de respaldo en users bloqueada por reglas; se asume perfil no encontrado.",
+          queryError
+        );
+        return null;
+      }
+      throw queryError;
     }
 
     return null;
@@ -1084,32 +1140,57 @@ export async function getBestStudentRoute(studentId, options = {}) {
   RESOURCES
 ============================================================================= */
 
-function resourceMatchesStudent(resource, student) {
-  if (!student) return true;
+function normalizeAreaText(value) {
+  return safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
 
-  const resourceArea = safeText(
+function getStudentAreas(student) {
+  if (!student) return [];
+
+  return unique(
+    [
+      student.area,
+      student.instrument,
+      student.instrumento,
+      student.program,
+      student.programa,
+      student.process,
+      student.proceso,
+    ]
+      .map((item) => normalizeAreaText(item))
+      .filter(Boolean)
+  );
+}
+
+function resourceMatchesStudent(resource, student) {
+  const resourceArea = normalizeAreaText(
     resource.area ||
     resource.instrument ||
     resource.instrumento ||
     resource.program ||
     resource.programa
-  ).toLowerCase();
+  );
 
+  /* Recursos sin área son material general visible para todos. */
   if (!resourceArea) return true;
 
-  const studentValues = [
-    student.area,
-    student.instrument,
-    student.instrumento,
-    student.program,
-    student.programa,
-    student.process,
-    student.proceso,
-  ]
-    .map((item) => safeText(item).toLowerCase())
-    .filter(Boolean);
+  const studentAreas = getStudentAreas(student);
 
-  return studentValues.some((value) => value === resourceArea);
+  if (!studentAreas.length) return true;
+
+  /*
+    Coincidencia flexible: "guitarra" empata con "Guitarra Acústica",
+    "violín" con "violin", etc.
+  */
+  return studentAreas.some(
+    (value) =>
+      value === resourceArea ||
+      value.includes(resourceArea) ||
+      resourceArea.includes(value)
+  );
 }
 
 export async function listResources(options = {}) {
@@ -1118,32 +1199,40 @@ export async function listResources(options = {}) {
       max = LIMITS?.maxResourcesPage || DEFAULT_MAX,
       student = null,
       studentId = null,
-      visibility = "students",
       activeOnly = true,
     } = options;
 
     const finalMax = clampLimit(max, DEFAULT_MAX, 120);
-    const resourcesRef = collection(db, COLLECTIONS.resources);
+
+    /*
+      Los recursos viven en el proyecto biblioteca-guitarra-fa182,
+      colección "recursos". Solo se muestran los publicados, filtrados
+      por el área a la que está inscrito el estudiante.
+    */
+    const resourcesRef = collection(libraryDb, LIBRARY_COLLECTIONS.resources);
 
     const clauses = [];
 
-    if (visibility) {
-      clauses.push(where("visibility", "in", unique([visibility, "public"])));
+    if (activeOnly) {
+      clauses.push(where("estado", "==", "publicado"));
     }
 
-    if (activeOnly) {
-      clauses.push(where("active", "==", true));
-    }
+    /*
+      Se leen todos los publicados (la biblioteca tiene ~200 recursos) y el
+      filtro por área se hace en cliente, porque las áreas del estudiante
+      pueden venir con mayúsculas o sin tildes.
+    */
+    const fetchCap = 1000;
 
     const primary = query(
       resourcesRef,
       ...clauses,
-      limit(finalMax)
+      limit(fetchCap)
     );
 
     const fallback = query(
       resourcesRef,
-      limit(finalMax)
+      limit(fetchCap)
     );
 
     const snap = await getDocsSafe(primary, fallback, "listResources");
@@ -1174,7 +1263,7 @@ export async function getResource(resourceId) {
     const id = safeText(resourceId);
     assertNonEmptyString(id, "resourceId");
 
-    const ref = doc(db, COLLECTIONS.resources, id);
+    const ref = doc(libraryDb, LIBRARY_COLLECTIONS.resources, id);
     const snap = await getDoc(ref);
 
     return snap.exists()
