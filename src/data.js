@@ -597,76 +597,91 @@ export async function getAccessProfileByEmail(email) {
     const normalizedEmail = normalizeEmail(email);
     assertNonEmptyString(normalizedEmail, "email");
 
-    const directRef = doc(db, COLLECTIONS.users, normalizedEmail);
-    const directSnap = await getDoc(directRef);
-
-    if (directSnap.exists()) {
-      return normalizeAccessProfile({
-        id: directSnap.id,
-        ...directSnap.data(),
-      });
-    }
-
     /*
-      Fallback por si algún documento fue creado con ID diferente pero tiene email.
-      Ojalá no, porque eso es pedirle a Firestore que adivine. Pero aquí somos
-      compasivos con el pasado.
+      En `users` un mismo correo puede tener VARIOS documentos:
+      - el histórico con ID = correo (a veces desactualizado / inactivo)
+      - los del sync de la hoja con ID tipo "student_stu_..."
+      Por eso reunimos todos los candidatos y elegimos el mejor, en vez de
+      quedarnos con el primero que aparezca.
     */
-    // Reintento directo con el correo tal cual (por si el doc fue creado
-    // con mayúsculas u otro formato antes de normalizar).
+    const candidates = [];
+    const seenIds = new Set();
+
+    const addCandidate = (id, data) => {
+      if (!id || seenIds.has(id)) return;
+      seenIds.add(id);
+      candidates.push({ id, ...data });
+    };
+
+    const directSnap = await getDoc(doc(db, COLLECTIONS.users, normalizedEmail));
+    if (directSnap.exists()) addCandidate(directSnap.id, directSnap.data());
+
+    // Por si el doc fue creado con el correo sin normalizar (mayúsculas, etc.)
     const rawEmail = safeText(email);
     if (rawEmail && rawEmail !== normalizedEmail) {
       const rawSnap = await getDoc(doc(db, COLLECTIONS.users, rawEmail));
-      if (rawSnap.exists()) {
-        return normalizeAccessProfile({
-          id: rawSnap.id,
-          ...rawSnap.data(),
-        });
-      }
+      if (rawSnap.exists()) addCandidate(rawSnap.id, rawSnap.data());
     }
-
-    const usersRef = collection(db, COLLECTIONS.users);
-    const byEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
-    const byCorreoQuery = query(usersRef, where("correo", "==", normalizedEmail), limit(1));
 
     /*
-      Si las reglas de Firestore bloquean estas consultas (versiones viejas
-      desplegadas), NO debe explotar todo el login: tratamos el bloqueo como
-      "perfil no encontrado" para que el usuario vea el mensaje correcto.
+      Consultas por campo email/correo. Si las reglas desplegadas todavía no
+      las permiten, no rompemos el login: seguimos con lo que tengamos.
     */
-    try {
-      const emailSnap = await getDocs(byEmailQuery);
+    const usersRef = collection(db, COLLECTIONS.users);
 
-      if (!emailSnap.empty) {
-        const found = emailSnap.docs[0];
-        return normalizeAccessProfile({
-          id: found.id,
-          ...found.data(),
-        });
-      }
-
-      const correoSnap = await getDocs(byCorreoQuery);
-
-      if (!correoSnap.empty) {
-        const found = correoSnap.docs[0];
-        return normalizeAccessProfile({
-          id: found.id,
-          ...found.data(),
-        });
-      }
-    } catch (queryError) {
-      const code = String(queryError?.code || queryError?.message || "");
-      if (code.includes("permission")) {
+    for (const field of ["email", "correo"]) {
+      try {
+        const snap = await getDocs(
+          query(usersRef, where(field, "==", normalizedEmail), limit(25))
+        );
+        snap.docs.forEach((found) => addCandidate(found.id, found.data()));
+      } catch (queryError) {
+        const code = String(queryError?.code || queryError?.message || "");
+        if (!code.includes("permission")) throw queryError;
         console.warn(
-          "[data] Consulta de respaldo en users bloqueada por reglas; se asume perfil no encontrado.",
+          `[data] Consulta de respaldo en users (${field}) bloqueada por reglas.`,
           queryError
         );
-        return null;
       }
-      throw queryError;
     }
 
-    return null;
+    if (!candidates.length) return null;
+
+    const isActiveProfile = (p) =>
+      p.active !== false && p.estado !== "inactivo";
+
+    const hasLinkedStudents = (p) =>
+      (Array.isArray(p.studentIds) && p.studentIds.length > 0) ||
+      (Array.isArray(p.students) && p.students.length > 0) ||
+      Boolean(safeText(p.studentId)) ||
+      Boolean(safeText(p.studentKey)) ||
+      Boolean(safeText(p.estudianteId));
+
+    // Preferimos documentos activos; entre ellos, los que tengan estudiantes.
+    const activeOnes = candidates.filter(isActiveProfile);
+    const pool = activeOnes.length ? activeOnes : candidates;
+    const base = pool.find(hasLinkedStudents) || pool[0];
+
+    // Fusionamos los estudiantes de TODOS los docs activos del mismo correo
+    // (un acudiente puede tener un doc por cada hijo).
+    const mergedStudentIds = unique(
+      pool
+        .flatMap((p) => [
+          ...safeArray(p.studentIds),
+          ...safeArray(p.students),
+          p.studentId,
+          p.studentKey,
+          p.estudianteId,
+        ])
+        .map((id) => safeText(id))
+        .filter(Boolean)
+    );
+
+    return normalizeAccessProfile({
+      ...base,
+      email: normalizedEmail,
+      studentIds: mergedStudentIds,
+    });
   } catch (error) {
     throw withContextError(error, "getAccessProfileByEmail");
   }
