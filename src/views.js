@@ -652,6 +652,7 @@ async function renderHome(deps) {
       ${heroHTML}
       ${stats}
       ${quickTiles}
+      ${musiProfeCtaCard()}
       ${badgesCard}
       <div class="split">
         <div class="stack">
@@ -1787,27 +1788,6 @@ async function renderMusiProfe(deps) {
     lastBitacora?.recomendaciones || ""
   );
 
-  const QUESTIONS = [
-    { id: "focus",       icon: "◇", label: "¿En qué me enfoco esta semana?" },
-    { id: "homework",    icon: "✎", label: "¿Cómo practico la tarea del profe?" },
-    { id: "level_up",   icon: "↑", label: "¿Cómo subo de nivel más rápido?" },
-    { id: "technique",  icon: "◉", label: "¿Qué técnica trabajo hoy?" },
-    { id: "performance", icon: "♪", label: "¿Cómo me preparo para una muestra?" },
-    { id: "motivation", icon: "✦", label: "¿Cómo mantengo la motivación?" },
-  ];
-
-  const questionsHTML = QUESTIONS.map((q) => `
-    <button
-      class="profe-q"
-      type="button"
-      data-profe-q="${escapeAttr(q.id)}"
-    >
-      <span class="profe-q__icon" aria-hidden="true">${escapeHtml(q.icon)}</span>
-      <span class="profe-q__label">${escapeHtml(q.label)}</span>
-      <span class="profe-q__arrow" aria-hidden="true">›</span>
-    </button>
-  `).join("");
-
   const goalsPreviewHTML = activeGoals.length
     ? activeGoals.slice(0, 4).map((g) => {
         const status = getGoalStatus(g);
@@ -1882,73 +1862,37 @@ async function renderMusiProfe(deps) {
         }),
       })}
 
-      ${card({
-        title: "Pregúntale a MusiProfe",
-        subtitle: "Respuestas personalizadas basadas en tu proceso y objetivos.",
-        bodyHTML: `
-          <div class="profe-questions" id="profeQuestions">
-            ${questionsHTML}
-          </div>
-          <div id="profeAnswerArea"></div>
-        `,
-      })}
+      ${musiProfeCtaCard()}
     `)}
   `;
 
-  return {
-    html,
-    afterRender: () => {
-      const container = document.getElementById("profeQuestions");
-      const answerArea = document.getElementById("profeAnswerArea");
-      if (!container || !answerArea) return;
+  return html;
+}
 
-      let activeId = null;
-
-      container.querySelectorAll(".profe-q").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const qId = btn.getAttribute("data-profe-q");
-
-          // Toggle
-          if (activeId === qId) {
-            activeId = null;
-            btn.classList.remove("is-active");
-            answerArea.innerHTML = "";
-            return;
-          }
-
-          // Deactivate previous
-          container.querySelectorAll(".profe-q").forEach((b) => b.classList.remove("is-active"));
-
-          activeId = qId;
-          btn.classList.add("is-active");
-
-          const answerHTML = generateProfeAnswer(qId, ctx, bundle || {});
-          answerArea.innerHTML = `
-            <div class="profe-answer" style="margin-top:12px;">
-              <div class="profe-answer__label">Respuesta de MusiProfe</div>
-              <div class="profe-answer__text">${answerHTML}</div>
-              <div class="profe-answer__close">
-                <button class="btn btn--ghost btn--sm" type="button" id="closeProfeAnswer">
-                  Cerrar respuesta
-                </button>
-              </div>
-            </div>
-          `;
-
-          document.getElementById("closeProfeAnswer")?.addEventListener("click", () => {
-            activeId = null;
-            container.querySelectorAll(".profe-q").forEach((b) => b.classList.remove("is-active"));
-            answerArea.innerHTML = "";
-          });
-
-          // Scroll suave a la respuesta
-          setTimeout(() => {
-            answerArea.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }, 80);
-        });
-      });
-    },
-  };
+/*
+  Tarjeta simple que invita a escribirle al chat flotante de MusiProfe.
+  Se usa tanto en Inicio como en la página de MusiProfe; el botón abre el
+  widget flotante (manejado en app.js vía data-action="open-musiprofe").
+*/
+function musiProfeCtaCard() {
+  return card({
+    title: "Pregúntale a MusiProfe",
+    subtitle: "Tu asistente de práctica, siempre a un mensaje.",
+    bodyHTML: `
+      <div class="profe-cta">
+        <img class="profe-cta__avatar" src="./assets/musiprofe.png" alt="" aria-hidden="true" />
+        <div class="profe-cta__text">
+          <strong>¿Tienes una duda con algo?</strong>
+          <span>Escríbele a MusiProfe y te ayudo con tu práctica, tu ruta o tu tarea — cuando quieras.</span>
+        </div>
+      </div>
+    `,
+    footerHTML: button("Escríbele a MusiProfe", {
+      variant: "primary",
+      action: "open-musiprofe",
+      icon: "✦",
+    }),
+  });
 }
 
 /* =============================================================================

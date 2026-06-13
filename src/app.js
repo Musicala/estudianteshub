@@ -1620,6 +1620,11 @@ function bindCoreHandlers() {
       return;
     }
 
+    if (action === "open-musiprofe") {
+      musiProfeChat?.open();
+      return;
+    }
+
     if (action === "student-picker") {
       await openStudentPicker();
       return;

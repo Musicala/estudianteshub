@@ -2295,6 +2295,40 @@ textarea.input {
   }
 }
 
+/* Tarjeta CTA "Escríbele a MusiProfe" (Inicio y página MusiProfe) */
+.profe-cta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profe-cta__avatar {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 3px var(--purple-soft);
+}
+
+.profe-cta__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.profe-cta__text strong {
+  color: var(--ink);
+  font-size: var(--fs-14);
+  font-weight: 800;
+}
+
+.profe-cta__text span {
+  color: var(--muted);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
 /* --------------------------------------------------------------------------
   Banner de instalación (PWA)
 -------------------------------------------------------------------------- */
