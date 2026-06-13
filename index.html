@@ -233,26 +233,6 @@
 
       <a
         class="bottom-nav__item"
-        href="#/practice"
-        data-route="practice"
-        aria-label="Diario de práctica"
-      >
-        <span class="bottom-nav__icon" aria-hidden="true">⊙</span>
-        <span class="bottom-nav__text">Diario</span>
-      </a>
-
-      <a
-        class="bottom-nav__item"
-        href="#/messages"
-        data-route="messages"
-        aria-label="Mensajes con tu docente"
-      >
-        <span class="bottom-nav__icon" aria-hidden="true">✉</span>
-        <span class="bottom-nav__text">Mensajes</span>
-      </a>
-
-      <a
-        class="bottom-nav__item"
         href="#/journal"
         data-route="journal"
         aria-label="Ver mis bitácoras de clase"
@@ -271,26 +251,73 @@
         <span class="bottom-nav__text">Recursos</span>
       </a>
 
-      <a
-        class="bottom-nav__item"
-        href="#/events"
-        data-route="events"
-        aria-label="Ver eventos y muestras"
+      <button
+        id="navMoreBtn"
+        class="bottom-nav__item bottom-nav__item--more"
+        type="button"
+        data-route-group="practice messages events timeline profile"
+        aria-haspopup="dialog"
+        aria-controls="navMoreSheet"
+        aria-label="Ver más secciones"
       >
-        <span class="bottom-nav__icon" aria-hidden="true">◷</span>
-        <span class="bottom-nav__text">Eventos</span>
-      </a>
-
-      <a
-        class="bottom-nav__item"
-        href="#/profile"
-        data-route="profile"
-        aria-label="Ver mi perfil"
-      >
-        <span class="bottom-nav__icon" aria-hidden="true">◎</span>
-        <span class="bottom-nav__text">Perfil</span>
-      </a>
+        <span class="bottom-nav__icon" aria-hidden="true">⋯</span>
+        <span class="bottom-nav__text">Más</span>
+      </button>
     </nav>
+
+    <div id="navMoreSheet" class="more-sheet" role="dialog" aria-label="Más secciones" aria-hidden="true" hidden>
+      <div class="more-sheet__backdrop" data-close-more></div>
+
+      <div class="more-sheet__panel" role="menu">
+        <div class="more-sheet__handle" aria-hidden="true"></div>
+        <div class="more-sheet__title">Más secciones</div>
+
+        <a class="more-sheet__item" href="#/practice" data-route="practice" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">⊙</span>
+          <span class="more-sheet__label">
+            <strong>Diario</strong>
+            <span>Registra tu práctica diaria.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+
+        <a class="more-sheet__item" href="#/messages" data-route="messages" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">✉</span>
+          <span class="more-sheet__label">
+            <strong>Mensajes</strong>
+            <span>Comunícate con tu docente.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+
+        <a class="more-sheet__item" href="#/events" data-route="events" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">◷</span>
+          <span class="more-sheet__label">
+            <strong>Eventos</strong>
+            <span>Muestras, talleres y actividades.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+
+        <a class="more-sheet__item" href="#/timeline" data-route="timeline" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">◷</span>
+          <span class="more-sheet__label">
+            <strong>Mi proceso</strong>
+            <span>Línea del tiempo de tu aprendizaje.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+
+        <a class="more-sheet__item" href="#/profile" data-route="profile" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">◎</span>
+          <span class="more-sheet__label">
+            <strong>Perfil</strong>
+            <span>Tu información general como estudiante.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+      </div>
+    </div>
 
     <button
       id="musiprofeFab"

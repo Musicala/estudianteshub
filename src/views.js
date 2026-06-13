@@ -37,7 +37,6 @@ import {
   journalCard,
   resourceCard,
   eventCard,
-  routeTile,
   itemRow,
   grid,
   stack,
@@ -533,19 +532,6 @@ async function renderHome(deps) {
     }),
   });
 
-  const quickTiles = grid(`
-    ${routeTile("route",      "Mi ruta",    "Objetivos, avances y próximos pasos.", "◇")}
-    ${routeTile("routine",    "Mi rutina",  "Tu plan semanal de práctica.", "⊞")}
-    ${routeTile("musiprofe",  "MusiProfe",  "Tu asistente de práctica musical.", "✦")}
-    ${routeTile("practice",   "Diario",     "Registra tu práctica diaria.", "⊙")}
-    ${routeTile("messages",   "Mensajes",   "Comunícate con tu docente.", "✉")}
-    ${routeTile("journal",    "Bitácora",   "Registro de lo trabajado clase a clase.", "✎")}
-    ${routeTile("resources",  "Recursos",   "Material para practicar y repasar.", "▦")}
-    ${routeTile("events",     "Eventos",    "Muestras, talleres y actividades.", "◷")}
-    ${routeTile("timeline",   "Mi proceso", "Línea del tiempo de tu aprendizaje.", "◷")}
-    ${routeTile("profile",    "Perfil",     "Tu información general como estudiante.", "◎")}
-  `);
-
   const resourcesHTML = resources.length
     ? grid(resources.slice(0, 2).map((item) => resourceCard(item)).join(""))
     : emptyState("Sin recursos todavía", "Cuando haya materiales recomendados, estarán aquí.", {
@@ -651,7 +637,6 @@ async function renderHome(deps) {
     ${stack(`
       ${heroHTML}
       ${stats}
-      ${quickTiles}
       ${musiProfeCtaCard()}
       ${badgesCard}
       <div class="split">

@@ -596,7 +596,14 @@ export function setActiveNav(route = "") {
 
   $$(".bottom-nav__item").forEach((item) => {
     const itemRoute = safeText(item.dataset.route);
-    const isActive = itemRoute === cleanRoute;
+
+    // El botón "Más" agrupa varias rutas (data-route-group="a b c").
+    const group = safeText(item.dataset.routeGroup);
+    const inGroup = group
+      ? group.split(/\s+/).filter(Boolean).includes(cleanRoute)
+      : false;
+
+    const isActive = itemRoute === cleanRoute || inGroup;
 
     item.classList.toggle("is-active", isActive);
 

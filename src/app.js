@@ -1205,7 +1205,40 @@ function setMusiprofeFabVisibility() {
 
   els.musiprofeFab.hidden = !showPortal;
 
-  if (!showPortal) musiProfeChat?.reset();
+  if (!showPortal) {
+    musiProfeChat?.reset();
+    closeMoreSheet();
+  }
+}
+
+function openMoreSheet() {
+  const sheet = $("#navMoreSheet");
+  if (!sheet) return;
+  sheet.hidden = false;
+  sheet.setAttribute("aria-hidden", "false");
+  document.body.classList.add("more-sheet-open");
+}
+
+function closeMoreSheet() {
+  const sheet = $("#navMoreSheet");
+  if (!sheet) return;
+  sheet.hidden = true;
+  sheet.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("more-sheet-open");
+}
+
+function wireMoreSheet() {
+  $("#navMoreBtn")?.addEventListener("click", openMoreSheet);
+
+  $("#navMoreSheet")?.addEventListener("click", (event) => {
+    if (event.target?.closest?.("[data-close-more]")) {
+      closeMoreSheet();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMoreSheet();
+  });
 }
 
 /* =============================================================================
@@ -1554,6 +1587,8 @@ function bindCoreHandlers() {
   els.musiprofeFab?.addEventListener("click", () => {
     musiProfeChat?.toggle();
   });
+
+  wireMoreSheet();
 
   els.btnLogin?.addEventListener("click", handleLoginClick);
   els.btnLogout?.addEventListener("click", handleLogoutClick);

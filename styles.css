@@ -1984,6 +1984,135 @@ textarea.input {
   text-overflow: ellipsis;
 }
 
+/* El botón "Más" se ve igual que un item de la barra */
+.bottom-nav__item--more {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* --------------------------------------------------------------------------
+  Hoja inferior "Más secciones"
+-------------------------------------------------------------------------- */
+
+.more-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.more-sheet[hidden] {
+  display: none;
+}
+
+.more-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.42);
+  backdrop-filter: blur(2px);
+  animation: more-fade var(--dur-fast, 160ms) var(--ease, ease) both;
+}
+
+.more-sheet__panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: 72vh;
+  overflow-y: auto;
+  padding: 8px 14px calc(18px + var(--safe-bottom));
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  background: var(--surface);
+  box-shadow: 0 -16px 48px rgba(16, 24, 40, 0.24);
+  animation: more-slide-up var(--dur, 220ms) var(--ease, ease) both;
+}
+
+@keyframes more-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes more-slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.more-sheet__handle {
+  width: 42px;
+  height: 5px;
+  margin: 6px auto 10px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.more-sheet__title {
+  margin-bottom: 8px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--fs-11);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.more-sheet__item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 10px;
+  border-radius: var(--r-md);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background var(--dur-fast, 160ms) var(--ease, ease);
+}
+
+.more-sheet__item:hover {
+  background: rgba(12, 65, 196, 0.06);
+}
+
+.more-sheet__item + .more-sheet__item {
+  border-top: 1px solid var(--line-soft);
+}
+
+.more-sheet__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  color: #fff;
+  background: var(--brand-gradient);
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.more-sheet__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-right: auto;
+}
+
+.more-sheet__label strong {
+  font-size: var(--fs-14);
+  font-weight: 800;
+}
+
+.more-sheet__label span {
+  color: var(--muted);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.more-sheet__arrow {
+  color: var(--muted-2);
+  font-size: 1.2rem;
+}
+
 /* --------------------------------------------------------------------------
   MusiProfe · botón flotante (FAB)
 -------------------------------------------------------------------------- */
