@@ -57,6 +57,8 @@ import {
   dedupeStudents as dedupeStudentRecords,
   getCanonicalStudentKey,
   normalizeStudent as normalizeStudentRecord,
+  resolveStudentProcess,
+  normalizeStudentProcesses,
 } from "./normalizers.js";
 
 /* =============================================================================
@@ -1159,6 +1161,242 @@ export async function getBestStudentRoute(studentId, options = {}) {
   }
 
   return routes[0] || null;
+}
+
+/* =============================================================================
+  LEARNING ROUTE — route_templates + student_route_progress
+  Fuente: editor de "Bitácoras de Clase".
+  - route_templates/{artKey}                : estructura compartida por área/instrumento.
+  - student_route_progress/{studentId}__{artKey} : avance individual del estudiante.
+  El HUB solo lee (no escribe) estas colecciones.
+============================================================================= */
+
+const ROUTE_COMPONENT_ORDER = ["corporal", "tecnico", "teorico", "obras", "repertorio"];
+
+const ROUTE_COMPONENT_LABELS = Object.freeze({
+  corporal: "Corporal",
+  tecnico: "Técnico",
+  teorico: "Teórico",
+  obras: "Obras",
+  repertorio: "Repertorio",
+  general: "General",
+});
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = safeText(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function toComponentId(value = "") {
+  const normalized = safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+  if (normalized.includes("corporal")) return "corporal";
+  if (normalized.includes("tecnico")) return "tecnico";
+  if (normalized.includes("teorico")) return "teorico";
+  if (normalized.includes("obra")) return "obras";
+  if (normalized.includes("repertorio")) return "repertorio";
+  return normalized || "general";
+}
+
+/*
+  Deriva el artKey (id de plantilla) a partir del área/instrumento del estudiante.
+  Réplica exacta de normalizeArtKey() del editor de Bitácoras, para que el HUB
+  apunte al mismo documento de route_templates.
+*/
+export function resolveRouteArtKey(student = null) {
+  const activeProcess =
+    resolveStudentProcess(student) ||
+    normalizeStudentProcesses(student)[0] ||
+    null;
+
+  const rawValue = firstNonEmpty(
+    activeProcess?.detalle,
+    activeProcess?.label,
+    activeProcess?.programa,
+    activeProcess?.instrumento,
+    activeProcess?.arte,
+    student?.area,
+    student?.instrumento,
+    student?.programa
+  );
+
+  const normalized = safeText(rawValue)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!normalized) return "general";
+  if (normalized.includes("bateria") || normalized.includes("percusion")) return "bateria";
+  if (normalized.includes("guitarra")) return "guitarra";
+  if (normalized.includes("cello") || normalized.includes("violoncello")) return "cello";
+  if (normalized.includes("canto")) return "canto";
+  if (normalized.includes("danza")) return "danza";
+  if (normalized.includes("teatro")) return "teatro";
+  if (normalized.includes("plast")) return "artes-plasticas";
+  return normalized;
+}
+
+function normalizeLearningGoal(raw = {}, index = 0, sets = {}) {
+  if (!raw || typeof raw !== "object") return null;
+
+  const id = safeText(raw.id) || `goal-${index + 1}`;
+  const title = safeText(raw.title || raw.titulo || raw.nombre);
+  if (!title) return null;
+
+  const component = toComponentId(raw.component || raw.componentLabel);
+  const componentLabel =
+    safeText(raw.componentLabel) || ROUTE_COMPONENT_LABELS[component] || "General";
+
+  const done = sets.completed?.has(id) || false;
+  const active = !done && (sets.active?.has(id) || false);
+
+  return {
+    id,
+    title,
+    description: safeText(raw.description || raw.descripcion),
+    component,
+    componentLabel,
+    experience: Number(raw.experience) || 1,
+    order: Number(raw.order) || index + 1,
+    done,
+    active,
+    status: done ? "Logrado" : active ? "En foco" : "",
+  };
+}
+
+function buildLearningRoute({ student, artKey, template, progress }) {
+  const tmpl = template && typeof template === "object" ? template : {};
+  const prog = progress && typeof progress === "object" ? progress : {};
+
+  const completed = new Set((prog.completedGoalIds || []).map((v) => safeText(v)));
+  const active = new Set((prog.activeGoalIds || []).map((v) => safeText(v)));
+
+  const rawGoals = Array.isArray(tmpl.goals)
+    ? tmpl.goals
+    : Array.isArray(tmpl.customGoals)
+      ? tmpl.customGoals
+      : [];
+
+  const goals = rawGoals
+    .map((goal, index) => normalizeLearningGoal(goal, index, { completed, active }))
+    .filter(Boolean)
+    .sort((a, b) => a.experience - b.experience || a.order - b.order);
+
+  const totalGoals = goals.length;
+  const completedGoals = goals.filter((goal) => goal.done).length;
+  const progressPct = totalGoals ? Math.round((completedGoals / totalGoals) * 100) : 0;
+
+  // Agrupación por bloque (componente), respetando el orden canónico.
+  const byComponent = new Map();
+  for (const goal of goals) {
+    if (!byComponent.has(goal.component)) byComponent.set(goal.component, []);
+    byComponent.get(goal.component).push(goal);
+  }
+
+  const blocks = [...byComponent.keys()]
+    .sort((a, b) => {
+      const ia = ROUTE_COMPONENT_ORDER.indexOf(a);
+      const ib = ROUTE_COMPONENT_ORDER.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    })
+    .map((component) => {
+      const items = byComponent.get(component);
+      return {
+        component,
+        label: ROUTE_COMPONENT_LABELS[component] || items[0]?.componentLabel || "General",
+        goals: items,
+        total: items.length,
+        done: items.filter((g) => g.done).length,
+      };
+    });
+
+  const experienceDescriptions =
+    tmpl.experienceDescriptions && typeof tmpl.experienceDescriptions === "object"
+      ? tmpl.experienceDescriptions
+      : {};
+
+  const experiences = [...new Set(goals.map((g) => g.experience))]
+    .sort((a, b) => a - b)
+    .map((experience) => {
+      const items = goals.filter((g) => g.experience === experience);
+      return {
+        experience,
+        label: `Experiencia ${experience}`,
+        description: safeText(experienceDescriptions[String(experience)]),
+        goals: items,
+        total: items.length,
+        done: items.filter((g) => g.done).length,
+      };
+    });
+
+  const processLabel = firstNonEmpty(tmpl.processLabel, prog.processLabel, tmpl.focusArea);
+
+  return {
+    id: `${getStudentIdentity(student)}__${artKey}`,
+    studentId: getStudentIdentity(student),
+    artKey,
+    routeTemplateId: artKey,
+    isLearningRoute: true,
+
+    title: firstNonEmpty(tmpl.routeName, "Ruta de aprendizaje"),
+    routeName: firstNonEmpty(tmpl.routeName, "Ruta de aprendizaje"),
+    processLabel,
+    description: firstNonEmpty(tmpl.description, tmpl.descripcion),
+
+    stage: firstNonEmpty(prog.stage, "Experiencia 1"),
+    experience: Number(prog.experience) || 1,
+
+    goals,
+    blocks,
+    experiences,
+    experienceDescriptions,
+
+    totalGoals,
+    completedGoals,
+    progress: progressPct,
+
+    recommendations: Array.isArray(prog.recommendations) ? prog.recommendations : [],
+    history: Array.isArray(prog.history) ? prog.history : [],
+    milestones: Array.isArray(prog.milestones) ? prog.milestones : [],
+
+    hasTemplate: Boolean(template),
+    hasProgress: Boolean(progress),
+  };
+}
+
+export async function getStudentLearningRoute(student = null, options = {}) {
+  try {
+    const studentId = getStudentIdentity(student);
+    if (!studentId) return null;
+
+    const artKey = safeText(options.artKey) || resolveRouteArtKey(student);
+    if (!artKey) return null;
+
+    const progressDocId = `${studentId}__${artKey}`;
+
+    const [templateSnap, progressSnap] = await Promise.all([
+      getDoc(doc(db, COLLECTIONS.routeTemplates, artKey)).catch(() => null),
+      getDoc(doc(db, COLLECTIONS.studentRouteProgress, progressDocId)).catch(() => null),
+    ]);
+
+    const template = templateSnap?.exists() ? templateSnap.data() : null;
+    const progress = progressSnap?.exists() ? progressSnap.data() : null;
+
+    if (!template && !progress) return null;
+
+    return buildLearningRoute({ student, artKey, template, progress });
+  } catch (error) {
+    // La ruta de aprendizaje es complementaria: si falla, la vista usa su fallback.
+    return null;
+  }
 }
 
 /* =============================================================================

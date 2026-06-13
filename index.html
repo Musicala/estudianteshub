@@ -292,18 +292,61 @@
       </a>
     </nav>
 
-    <a
+    <button
       id="musiprofeFab"
       class="musiprofe-fab"
-      href="#/musiprofe"
-      data-route="musiprofe"
+      type="button"
       aria-label="Abrir MusiProfe, tu asistente musical"
+      aria-haspopup="dialog"
       title="MusiProfe"
       hidden
     >
-      <span class="musiprofe-fab__icon" aria-hidden="true">✦</span>
+      <img
+        class="musiprofe-fab__avatar"
+        src="./assets/musiprofe.png"
+        alt=""
+        aria-hidden="true"
+      />
       <span class="musiprofe-fab__text">MusiProfe</span>
-    </a>
+    </button>
+
+    <section
+      id="musiprofeChat"
+      class="profe-chat"
+      role="dialog"
+      aria-label="Chat con MusiProfe"
+      aria-hidden="true"
+      hidden
+    >
+      <header class="profe-chat__header">
+        <img class="profe-chat__avatar" src="./assets/musiprofe.png" alt="" aria-hidden="true" />
+        <div class="profe-chat__id">
+          <strong>MusiProfe</strong>
+          <span>Tu asistente de práctica</span>
+        </div>
+        <button
+          id="musiprofeChatClose"
+          class="profe-chat__close"
+          type="button"
+          aria-label="Cerrar chat"
+        >✕</button>
+      </header>
+
+      <div id="musiprofeChatBody" class="profe-chat__body"></div>
+
+      <div id="musiprofeChatSuggestions" class="profe-chat__suggestions"></div>
+
+      <form id="musiprofeChatForm" class="profe-chat__form" autocomplete="off">
+        <input
+          id="musiprofeChatInput"
+          class="profe-chat__input"
+          type="text"
+          placeholder="Escríbele a MusiProfe…"
+          aria-label="Escribe tu mensaje"
+        />
+        <button class="profe-chat__send" type="submit" aria-label="Enviar mensaje">➤</button>
+      </form>
+    </section>
   </div>
 
   <div id="modalRoot" class="modal-root" hidden>

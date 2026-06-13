@@ -8,7 +8,7 @@
 ============================================================================= */
 
 const APP_NAME = "estudiantes-hub-musicala";
-const CACHE_VERSION = "v1.1.0";
+const CACHE_VERSION = "v1.2.0";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;
@@ -35,8 +35,10 @@ const APP_SHELL = [
   "./src/normalizers.js",
   "./src/ui.js",
   "./src/views.js",
+  "./src/musiprofe.js",
 
   "./assets/logo.png",
+  "./assets/musiprofe.png",
 
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",

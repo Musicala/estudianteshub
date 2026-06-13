@@ -104,6 +104,12 @@ export const COLLECTIONS = Object.freeze({
   bitacoras: "bitacoras",
   studentRoutes: "student_routes",
 
+  // Rutas de aprendizaje (fuente: editor de Bitácoras de Clase).
+  // route_templates: estructura compartida por área/instrumento (artKey).
+  // student_route_progress: avance por estudiante ({studentId}__{artKey}).
+  routeTemplates: "route_templates",
+  studentRouteProgress: "student_route_progress",
+
   appConfig: "app_config",
   resources: "resources",
   events: "events",

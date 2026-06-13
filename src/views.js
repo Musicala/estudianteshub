@@ -138,6 +138,42 @@ function htmlText(value = "", fallback = "—") {
   return escapeHtml(uiSafeText(value, fallback));
 }
 
+/*
+  Devuelve una etiqueta legible para humanos.
+
+  Si el valor parece un identificador técnico / slug interno
+  (p. ej. "proc_andres_camilo_gutierrez_rincon_musica_percusion_618",
+  "fallback_musica_percusion", IDs con guiones bajos, etc.) NO lo mostramos
+  crudo: se reemplaza por el texto de respaldo. Este portal nunca debe
+  exponer claves técnicas al estudiante.
+*/
+function isTechnicalKey(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return false;
+
+  // Prefijos internos conocidos.
+  if (/^(proc|process|proceso|fallback|fb|ruta|route|doc|id)[_-]/i.test(text)) {
+    return true;
+  }
+
+  // Slug "máquina": sin espacios, todo minúsculas/números unido por _ o -.
+  // Ej: "musica_percusion_618", "andres-camilo-618".
+  if (/\s/.test(text)) return false; // tiene espacios → es texto humano
+  if (/[_-]/.test(text) && /^[a-z0-9_-]+$/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+function humanLabel(value = "", fallback = "") {
+  const text = uiSafeText(value, "");
+  if (!text || isTechnicalKey(text)) {
+    return uiSafeText(fallback, "");
+  }
+  return text;
+}
+
 function paragraphize(text = "", fallback = "Sin información registrada.") {
   const clean = uiSafeText(text, fallback);
 
@@ -186,7 +222,7 @@ function getBitacoraTitle(bitacora = {}) {
 }
 
 function getProcessLabel(item = {}) {
-  return uiSafeText(
+  return humanLabel(
     item.process?.processLabel ||
       item.process?.label ||
       item.process?.programa ||
@@ -394,7 +430,14 @@ async function renderHome(deps) {
   const lastBitacora = bitacoras[0] || null;
   const nextEvent = events[0] || null;
 
-  const progress = routeProgress(route);
+  // Ruta de aprendizaje real (route_templates + student_route_progress).
+  let learning = null;
+  if (typeof api.getStudentLearningRoute === "function") {
+    learning = await api.getStudentLearningRoute(student).catch(() => null);
+  }
+  const hasLearning = Boolean(learning && learning.totalGoals > 0);
+
+  const progress = hasLearning ? learning.progress : routeProgress(route);
 
   const heroHTML = hero({
     badge: "Tu espacio de aprendizaje",
@@ -416,18 +459,39 @@ async function renderHome(deps) {
     `,
   });
 
+  const routeCardHeading = hasLearning
+    ? (humanLabel(learning.processLabel, "") || humanLabel(learning.routeName, "Ruta de aprendizaje"))
+    : (route ? (route.title || route.titulo || "Ruta de aprendizaje") : "");
+
   const routeCard = card({
     title: "Ruta de aprendizaje",
-    subtitle: route
-      ? route.description || route.descripcion || "Tu proceso actual en Musicala."
-      : "Todavía no hay una ruta configurada.",
-    bodyHTML: route
+    subtitle: hasLearning
+      ? (learning.stage
+          ? `${learning.stage} · ${learning.completedGoals}/${learning.totalGoals} objetivos logrados`
+          : "Tu proceso actual en Musicala.")
+      : route
+        ? route.description || route.descripcion || "Tu proceso actual en Musicala."
+        : "Todavía no hay una ruta configurada.",
+    bodyHTML: hasLearning
       ? `
         <div class="route-summary">
           <div>
-            <h3 class="route-summary__title">${htmlText(route.title || route.titulo || "Ruta de aprendizaje")}</h3>
+            <h3 class="route-summary__title">${htmlText(routeCardHeading)}</h3>
+            <div class="chips">
+              ${chip(`${learning.completedGoals}/${learning.totalGoals} objetivos`, "soft")}
+              ${chip(`${learning.progress}% de avance`, "purple")}
+            </div>
+          </div>
+          ${routeProgressCircle(progress)}
+        </div>
+      `
+      : route
+      ? `
+        <div class="route-summary">
+          <div>
+            <h3 class="route-summary__title">${htmlText(routeCardHeading)}</h3>
             <p class="route-summary__text">
-              ${htmlText(route.processKey || route.proceso || route.process || "Proceso general")}
+              ${htmlText(humanLabel(route.processLabel || route.process?.processLabel || route.process?.label, "") || humanLabel(route.processKey || route.proceso || route.process, "Proceso general"))}
             </p>
           </div>
           ${routeProgressCircle(progress)}
@@ -702,6 +766,17 @@ async function renderRouteView(deps) {
 
   routes = normalizeStudentRoutes(routes);
 
+  // Ruta de aprendizaje real (route_templates + student_route_progress),
+  // tal como la define el equipo en "Bitácoras de Clase".
+  let learning = null;
+  if (typeof api.getStudentLearningRoute === "function") {
+    learning = await api.getStudentLearningRoute(getStudent(ctx)).catch(() => null);
+  }
+
+  if (learning && learning.totalGoals > 0) {
+    return renderLearningRoute(ctx, learning, studentId);
+  }
+
   let mainRoute = routes[0] || null;
 
   if (!mainRoute) {
@@ -738,7 +813,7 @@ async function renderRouteView(deps) {
       <div class="route-summary">
         <div>
           <h3 class="route-summary__title">
-            ${htmlText(mainRoute.processKey || mainRoute.proceso || mainRoute.process || "Proceso general")}
+            ${htmlText(humanLabel(mainRoute.processLabel || mainRoute.process?.processLabel || mainRoute.process?.label, "") || humanLabel(mainRoute.processKey || mainRoute.proceso || mainRoute.process, "Proceso general"))}
           </h3>
 
           <p class="route-summary__text">
@@ -816,7 +891,7 @@ async function renderRouteView(deps) {
           <div class="list">
             ${routes.slice(1).map((route) => itemRow({
               title: route.title || route.titulo || "Ruta de aprendizaje",
-              meta: route.description || route.descripcion || route.processKey || "Proceso",
+              meta: route.description || route.descripcion || humanLabel(route.processKey || route.proceso, "Proceso"),
               side: `${routeProgress(route)}%`,
               icon: "◇",
             })).join("")}
@@ -869,8 +944,240 @@ async function renderRouteView(deps) {
 }
 
 /* =============================================================================
+  Learning route (route_templates + student_route_progress)
+  Render rico: objetivos agrupados por bloque y por experiencia, con avance real.
+============================================================================= */
+
+const LEARNING_BLOCK_ICONS = {
+  corporal: "◳",
+  tecnico: "◆",
+  teorico: "◈",
+  obras: "♪",
+  repertorio: "♫",
+  general: "○",
+};
+
+function learningGoalRow(goal, studentId) {
+  const icon = goal.done ? "✓" : goal.active ? "◉" : "○";
+  const tone = goal.done ? "success" : goal.active ? "pink" : "ghost";
+  const evalVal = loadAutoEval(studentId, goal.title);
+
+  return `
+    ${itemRow({
+      title:      goal.title,
+      meta:       goal.description || `Experiencia ${goal.experience}`,
+      icon,
+      className:  goal.active ? "item--next" : "",
+      actionHTML: chip(goal.status || "Pendiente", tone),
+    })}
+    <div class="autoeval" style="padding:4px 12px 12px 44px;">
+      <span class="autoeval__label">Mi autoevaluación:</span>
+      ${renderStarRating(studentId, goal.title, evalVal)}
+    </div>
+  `;
+}
+
+function renderLearningRoute(ctx, learning, studentId) {
+  const heading = humanLabel(learning.processLabel, "") || humanLabel(learning.routeName, "Ruta de aprendizaje");
+
+  const summary = card({
+    title: heading,
+    subtitle: learning.stage
+      ? `${learning.stage} · ${learning.completedGoals}/${learning.totalGoals} objetivos logrados`
+      : "Objetivos, avances y próximos pasos del proceso.",
+    bodyHTML: `
+      <div class="route-summary">
+        <div>
+          <h3 class="route-summary__title">${htmlText(learning.routeName || "Ruta de aprendizaje")}</h3>
+          <p class="route-summary__text">
+            ${htmlText(learning.description || "Este es tu camino de aprendizaje en Musicala, paso a paso.")}
+          </p>
+          <div class="chips">
+            ${chip(`${learning.completedGoals}/${learning.totalGoals} objetivos`, "soft")}
+            ${chip(`${learning.progress}% de avance`, "purple")}
+            ${learning.stage ? chip(learning.stage, "pink") : ""}
+          </div>
+        </div>
+        ${routeProgressCircle(learning.progress)}
+      </div>
+    `,
+  });
+
+  // Bloques por componente (Corporal / Técnico / Teórico / Obras …).
+  const blocksHTML = learning.blocks.length
+    ? `<div class="grid">${learning.blocks.map((block) => card({
+        title: `${LEARNING_BLOCK_ICONS[block.component] || "○"} ${block.label}`,
+        subtitle: `${block.done}/${block.total} objetivos`,
+        bodyHTML: `<div class="list">${block.goals.map((goal) => learningGoalRow(goal, studentId)).join("")}</div>`,
+      })).join("")}</div>`
+    : emptyState("Sin objetivos registrados", "Aún no hay objetivos específicos en esta ruta.", { icon: "○" });
+
+  // Resumen por experiencia.
+  const experiencesHTML = learning.experiences.length
+    ? card({
+        title: "Tus experiencias",
+        subtitle: "Cómo avanza tu ruta por etapas.",
+        bodyHTML: `<div class="list">${learning.experiences.map((exp) => itemRow({
+          title: exp.label,
+          meta: exp.description || "Etapa de tu proceso de aprendizaje.",
+          side: `${exp.done}/${exp.total}`,
+          icon: exp.done >= exp.total && exp.total > 0 ? "✓" : "◷",
+        })).join("")}</div>`,
+      })
+    : "";
+
+  const html = `
+    ${viewHeader("Mi ruta", studentSubtitle(ctx), {
+      eyebrow: "Ruta de aprendizaje",
+    })}
+
+    ${stack(`
+      ${summary}
+
+      ${progressBar(learning.progress, { label: "Avance general" })}
+
+      ${blocksHTML}
+
+      ${experiencesHTML}
+
+      ${card({
+        title: "Línea del tiempo",
+        subtitle: "Tu historial completo de clases, objetivos y eventos.",
+        footerHTML: button("Ver mi proceso", { variant: "ghost", route: "timeline", icon: "→" }),
+      })}
+    `)}
+  `;
+
+  return {
+    html,
+    afterRender: () => wireAutoEval(viewRoot(), studentId),
+  };
+}
+
+/* =============================================================================
   Journal
 ============================================================================= */
+
+/*
+  El contenido de una bitácora llega como un único texto con marcadores en
+  MAYÚSCULAS ("COMPONENTE CORPORAL:", "COMPONENTE TECNICO:", "CANCIONES/OBRAS:"…).
+  Aquí lo partimos en secciones para mostrarlo organizado y completo.
+*/
+const BITACORA_SECTION_META = {
+  corporal:        { label: "Corporal",          icon: "◳", tone: "blue" },
+  tecnico:         { label: "Técnico",           icon: "◆", tone: "purple" },
+  teorico:         { label: "Teórico",           icon: "◈", tone: "purple" },
+  obras:           { label: "Canciones / Obras", icon: "♪", tone: "pink" },
+  repertorio:      { label: "Repertorio",        icon: "♫", tone: "pink" },
+  tarea:           { label: "Tarea para casa",   icon: "✎", tone: "soft" },
+  observaciones:   { label: "Observaciones",     icon: "◎", tone: "soft" },
+  recomendaciones: { label: "Recomendaciones",   icon: "★", tone: "soft" },
+};
+
+function bitacoraSectionKey(label = "") {
+  const n = uiSafeText(label, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+  if (n.includes("corporal")) return "corporal";
+  if (n.includes("tecnic")) return "tecnico";
+  if (n.includes("teoric")) return "teorico";
+  if (n.includes("cancion") || n.includes("obra")) return "obras";
+  if (n.includes("repertorio")) return "repertorio";
+  if (n.includes("tarea")) return "tarea";
+  if (n.includes("observ")) return "observaciones";
+  if (n.includes("recomend")) return "recomendaciones";
+  if (n.includes("docente")) return "docente";
+  return "";
+}
+
+function titleCaseLabel(label = "") {
+  return uiSafeText(label, "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function parseBitacoraSections(content = "") {
+  const text = uiSafeText(content, "").trim();
+  if (!text) return { intro: "", sections: [] };
+
+  const labelRe = /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ]+(?:[ /][A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ]+)*)\s*:/g;
+  const marks = [];
+  let match;
+  while ((match = labelRe.exec(text)) !== null) {
+    marks.push({ label: match[1], start: match.index, vStart: match.index + match[0].length });
+  }
+
+  if (!marks.length) return { intro: text, sections: [] };
+
+  const intro = text.slice(0, marks[0].start).trim();
+  const sections = marks.map((mark, index) => {
+    const end = index + 1 < marks.length ? marks[index + 1].start : text.length;
+    return { rawLabel: mark.label, value: text.slice(mark.vStart, end).trim() };
+  });
+
+  return { intro, sections };
+}
+
+function bitacoraSectionValueHTML(value = "") {
+  const text = uiSafeText(value, "");
+  if (!text) return `<span class="bitacora-section__empty">Sin registro</span>`;
+
+  // Varias piezas cortas separadas por coma → lista legible.
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+  const asList = parts.length >= 2 && parts.every((part) => part.length <= 90);
+
+  if (asList) {
+    return `<ul class="bitacora-section__list">${parts
+      .map((part) => `<li>${escapeHtml(part)}</li>`)
+      .join("")}</ul>`;
+  }
+
+  return `<p class="bitacora-section__text">${escapeHtml(text)}</p>`;
+}
+
+function renderBitacoraSections(content = "") {
+  const { intro, sections } = parseBitacoraSections(content);
+
+  // El docente ya se muestra en la cabecera de la tarjeta.
+  const visible = sections.filter((section) => bitacoraSectionKey(section.rawLabel) !== "docente");
+
+  if (!visible.length) {
+    const text = intro || uiSafeText(content, "");
+    return text
+      ? `<p class="journal-card__content">${escapeHtml(text)}</p>`
+      : `<p class="journal-card__content">Sin contenido registrado.</p>`;
+  }
+
+  const introHTML = intro ? `<p class="journal-card__content">${escapeHtml(intro)}</p>` : "";
+
+  const itemsHTML = visible
+    .map((section) => {
+      const key = bitacoraSectionKey(section.rawLabel);
+      const meta = BITACORA_SECTION_META[key] || {
+        label: titleCaseLabel(section.rawLabel),
+        icon: "•",
+        tone: "soft",
+      };
+
+      return `
+        <div class="bitacora-section bitacora-section--${meta.tone}">
+          <div class="bitacora-section__head">
+            <span class="bitacora-section__icon">${meta.icon}</span>
+            <span class="bitacora-section__label">${escapeHtml(meta.label)}</span>
+          </div>
+          <div class="bitacora-section__body">${bitacoraSectionValueHTML(section.value)}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `${introHTML}<div class="bitacora-sections">${itemsHTML}</div>`;
+}
 
 async function renderJournal(deps) {
   const ctx = getCtx(deps);
@@ -954,11 +1261,7 @@ async function renderJournal(deps) {
           }).replace("data-action=\"open-bitacora\"", `data-action="open-bitacora" data-bitacora-id="${escapeAttr(id)}"`)}
         </div>
 
-        ${
-          content
-            ? `<p class="journal-card__content">${htmlText(truncateText(content, 260))}</p>`
-            : `<p class="journal-card__content">Sin contenido registrado.</p>`
-        }
+        ${renderBitacoraSections(content)}
 
         ${
           item.tags?.length
@@ -1057,7 +1360,7 @@ function openBitacoraModal(item = {}) {
     ]),
     bodyHTML: readBlock(`
       <h3>Registro de clase</h3>
-      ${paragraphize(content)}
+      ${renderBitacoraSections(content)}
 
       ${
         homework
@@ -1370,7 +1673,7 @@ function getProfeTipOfDay(instrument = "") {
   return bank[dayOfYear % bank.length];
 }
 
-function generateProfeAnswer(questionId, ctx = {}, bundle = {}) {
+export function generateProfeAnswer(questionId, ctx = {}, bundle = {}) {
   const student = getStudent(ctx);
   const instrument = uiSafeText(student?.instrument || student?.instrumento || "tu instrumento");
   const level     = uiSafeText(student?.level || student?.nivel || "tu nivel");
@@ -1530,7 +1833,7 @@ async function renderMusiProfe(deps) {
     ${stack(`
       <div class="profe-hero">
         <div class="profe-badge">
-          <span aria-hidden="true">✦</span>
+          <img class="profe-badge__avatar" src="./assets/musiprofe.png" alt="" aria-hidden="true" />
           <span>MusiProfe · Musicala</span>
         </div>
 

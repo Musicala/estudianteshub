@@ -22,6 +22,8 @@ import * as api from "./data.js";
 
 import { renderRoute } from "./views.js";
 
+import { createMusiProfeChat } from "./musiprofe.js";
+
 import {
   $,
   toast,
@@ -1202,6 +1204,8 @@ function setMusiprofeFabVisibility() {
     Boolean(state.student);
 
   els.musiprofeFab.hidden = !showPortal;
+
+  if (!showPortal) musiProfeChat?.reset();
 }
 
 /* =============================================================================
@@ -1539,8 +1543,17 @@ async function handleLogoutClick() {
   }
 }
 
+let musiProfeChat = null;
+
 function bindCoreHandlers() {
   wireModal();
+
+  musiProfeChat = createMusiProfeChat({ api, getContext });
+  musiProfeChat.mount();
+
+  els.musiprofeFab?.addEventListener("click", () => {
+    musiProfeChat?.toggle();
+  });
 
   els.btnLogin?.addEventListener("click", handleLoginClick);
   els.btnLogout?.addEventListener("click", handleLogoutClick);
