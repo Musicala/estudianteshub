@@ -260,6 +260,115 @@ function getResourceLabel(resource = {}) {
   ]);
 }
 
+function getResourceArea(resource = {}) {
+  return humanLabel(
+    resource.area ||
+      resource.instrument ||
+      resource.instrumento ||
+      resource.program ||
+      resource.programa,
+    "General"
+  ) || "General";
+}
+
+function getResourceCategory(resource = {}) {
+  const tag = safeArray(resource.tags || resource.etiquetas)
+    .map((item) => humanLabel(item, ""))
+    .find(Boolean);
+
+  return humanLabel(
+    resource.category ||
+      resource.categoria ||
+      resource.folder ||
+      resource.carpeta ||
+      resource.tema ||
+      tag ||
+      resource.type ||
+      resource.tipo,
+    "Material de apoyo"
+  ) || "Material de apoyo";
+}
+
+function groupBy(items = [], getKey = () => "") {
+  const grouped = new Map();
+
+  for (const item of items) {
+    const key = uiSafeText(getKey(item), "General");
+    grouped.set(key, [...(grouped.get(key) || []), item]);
+  }
+
+  return [...grouped.entries()].sort(([a], [b]) =>
+    a.localeCompare(b, "es", { sensitivity: "base" })
+  );
+}
+
+function renderResourceOverview(areaGroups = []) {
+  return `
+    <div class="resource-overview" aria-label="Resumen de recursos por área">
+      ${areaGroups.map(([area, list]) => `
+        <a class="resource-overview__item" href="#resources-area-${escapeAttr(slugify(area))}">
+          <span class="resource-overview__count">${escapeHtml(String(list.length))}</span>
+          <span class="resource-overview__label">${escapeHtml(area)}</span>
+        </a>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderResourceCategory(title = "", resources = []) {
+  return `
+    <section class="resource-category">
+      <header class="resource-category__head">
+        <h3 class="resource-category__title">${escapeHtml(title)}</h3>
+        <span class="resource-category__count">${escapeHtml(String(resources.length))}</span>
+      </header>
+
+      ${grid(resources.map((resource) => resourceCard(resource)).join(""), {
+        className: "resource-grid",
+      })}
+    </section>
+  `;
+}
+
+function renderResourceAreaSection(area = "", resources = [], index = 0) {
+  const categoryGroups = groupBy(resources, getResourceCategory);
+  const defaultOpen = index === 0 ? " open" : "";
+
+  return `
+    <details
+      class="resource-area"
+      id="resources-area-${escapeAttr(slugify(area))}"
+      ${defaultOpen}
+    >
+      <summary class="resource-area__summary">
+        <span>
+          <span class="resource-area__eyebrow">Área</span>
+          <strong>${escapeHtml(area)}</strong>
+        </span>
+        <span class="resource-area__meta">
+          ${escapeHtml(String(resources.length))}
+          ${resources.length === 1 ? "recurso" : "recursos"}
+        </span>
+      </summary>
+
+      <div class="resource-area__body">
+        ${categoryGroups.map(([category, list]) =>
+          renderResourceCategory(category, list)
+        ).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function slugify(value = "") {
+  return uiSafeText(value, "general")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "general";
+}
+
 function routeProgress(route = null) {
   const value = Number(route?.progress ?? route?.progreso ?? 0);
   return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
@@ -1413,22 +1522,32 @@ async function renderResources(deps) {
     `;
   }
 
-  const grouped = new Map();
-
-  for (const resource of resources) {
-    const key = uiSafeText(resource.type || resource.tipo || "Recurso", "Recurso");
-    grouped.set(key, [...(grouped.get(key) || []), resource]);
-  }
+  const areaGroups = groupBy(resources, getResourceArea);
+  const categoryGroups = groupBy(resources, getResourceCategory);
 
   const typeChips = `
     <div class="chips">
-      ${[...grouped.entries()].map(([type, list]) =>
-        chip(`${type}: ${list.length}`, "soft")
+      ${areaGroups.map(([area, list]) =>
+        chip(`${area}: ${list.length}`, "soft")
       ).join("")}
     </div>
   `;
 
-  const cardsHTML = resources.map((resource) => resourceCard(resource)).join("");
+  const categoryChips = `
+    <div class="chips">
+      ${categoryGroups.slice(0, 10).map(([category, list]) =>
+        chip(`${category}: ${list.length}`, "ghost")
+      ).join("")}
+    </div>
+  `;
+
+  const resourceSections = `
+    <div class="resource-board">
+      ${areaGroups.map(([area, list], index) =>
+        renderResourceAreaSection(area, list, index)
+      ).join("")}
+    </div>
+  `;
 
   const listHTML = resources.map((resource) => {
     const url = getResourceUrl(resource);
@@ -1450,16 +1569,20 @@ async function renderResources(deps) {
 
     ${stack(`
       ${card({
-        title: "Resumen",
-        subtitle: "Recursos disponibles para practicar y repasar.",
-        bodyHTML: typeChips,
+        title: "Explorar recursos",
+        subtitle: "Encuentra materiales de tu área organizados por tema.",
+        bodyHTML: `
+          ${renderResourceOverview(areaGroups)}
+          ${typeChips}
+          ${categoryChips}
+        `,
       })}
 
-      ${grid(cardsHTML)}
+      ${resourceSections}
 
       ${card({
-        title: "Listado completo",
-        subtitle: "Todos los recursos disponibles para este proceso.",
+        title: "Índice completo",
+        subtitle: "Todos los recursos disponibles para este proceso, en formato compacto.",
         bodyHTML: `<div class="list">${listHTML}</div>`,
       })}
     `)}

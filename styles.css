@@ -471,6 +471,12 @@ ol {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex-shrink: 0;
+}
+
+/* "Salir" siempre completo y con aire respecto al borde */
+#btnLogout {
+  flex-shrink: 0;
 }
 
 .user-badge {
@@ -1671,6 +1677,7 @@ ol {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
   border: 1px solid var(--line-soft);
   border-radius: var(--r-lg);
   background: rgba(255, 255, 255, 0.78);
@@ -1691,14 +1698,20 @@ ol {
   font-weight: 900;
 }
 
+.resource-card > div:not(.resource-card__icon),
+.event-card > div:not(.event-card__icon) {
+  min-width: 0;
+}
+
 .resource-card__title,
 .event-card__title {
   color: var(--ink);
   font-family: var(--font-title);
   font-size: var(--fs-15);
   font-weight: 800;
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .resource-card__text,
@@ -1707,6 +1720,7 @@ ol {
   font-size: var(--fs-13);
   font-weight: 500;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .resource-card__footer,
@@ -1714,6 +1728,155 @@ ol {
   margin-top: auto;
   padding-top: 10px;
   border-top: 1px solid var(--line-soft);
+}
+
+.resource-card__footer .btn,
+.event-card__footer .btn {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.resource-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.resource-overview__item {
+  min-width: 0;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--shadow-xs);
+  text-decoration: none;
+}
+
+.resource-overview__count {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: #ffffff;
+  background: var(--brand-gradient);
+  font-size: var(--fs-13);
+  font-weight: 900;
+}
+
+.resource-overview__label {
+  min-width: 0;
+  font-size: var(--fs-13);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.resource-board {
+  display: grid;
+  gap: 14px;
+}
+
+.resource-area {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.resource-area__summary {
+  min-height: 68px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.resource-area__summary::-webkit-details-marker {
+  display: none;
+}
+
+.resource-area__summary::after {
+  content: "+";
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--brand);
+  background: rgba(12, 65, 196, 0.08);
+  font-weight: 900;
+}
+
+.resource-area[open] .resource-area__summary::after {
+  content: "-";
+}
+
+.resource-area__summary strong {
+  display: block;
+  font-family: var(--font-title);
+  font-size: var(--fs-18);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.resource-area__eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted-2);
+  font-size: var(--fs-11);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.resource-area__meta,
+.resource-category__count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--fs-12);
+  font-weight: 800;
+}
+
+.resource-area__body {
+  padding: 0 16px 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.resource-category {
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.resource-category__head {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resource-category__title {
+  color: var(--ink);
+  font-family: var(--font-title);
+  font-size: var(--fs-15);
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.resource-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 
 /* --------------------------------------------------------------------------
@@ -2874,6 +3037,30 @@ textarea.input {
 
   .split {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Anchos intermedios: libera espacio antes de que "Salir" toque el borde */
+@media (max-width: 920px) {
+  /* "Ver como estudiante" se reduce a su ícono (conserva aria-label) */
+  #viewAsBtn span:not(:first-child) {
+    display: none;
+  }
+
+  /* El correo se oculta; basta el nombre para identificar la cuenta */
+  .user-badge__email {
+    display: none;
+  }
+
+  .user-badge {
+    max-width: 190px;
+  }
+
+  .brand__title {
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 

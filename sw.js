@@ -8,7 +8,7 @@
 ============================================================================= */
 
 const APP_NAME = "estudiantes-hub-musicala";
-const CACHE_VERSION = "v1.3.0";
+const CACHE_VERSION = "v1.3.1";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;

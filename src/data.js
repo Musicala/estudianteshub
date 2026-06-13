@@ -1410,26 +1410,240 @@ function normalizeAreaText(value) {
     .replace(/[̀-ͯ]/g, "");
 }
 
-function getStudentAreas(student) {
+function normalizeResourceText(value) {
+  return safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+const BROAD_MUSIC_TERMS = new Set([
+  "musica",
+  "musical",
+  "musicala",
+  "instrumento",
+  "instrumental",
+]);
+
+const MUSIC_THEORY_TERMS = [
+  "teoria",
+  "teoria musical",
+  "gramatica musical",
+  "lenguaje musical",
+  "lectura musical",
+  "solfeo",
+  "armonia",
+  "entrenamiento auditivo",
+  "dictado",
+  "dictados",
+  "ritmo",
+  "ritmica",
+  "intervalos",
+  "escalas",
+  "acordes",
+];
+
+const RESOURCE_INSTRUMENT_ALIASES = {
+  percusion: [
+    "percusion",
+    "bateria",
+    "drums",
+    "drum",
+    "tambor",
+    "tambores",
+    "redoblante",
+    "caja",
+    "cajon",
+    "conga",
+    "congas",
+    "bongo",
+    "bongos",
+    "timbal",
+    "timbales",
+    "platillos",
+    "baquetas",
+    "rudimentos",
+  ],
+  bateria: [
+    "bateria",
+    "percusion",
+    "drums",
+    "drum",
+    "redoblante",
+    "platillos",
+    "baquetas",
+    "rudimentos",
+  ],
+  guitarra: ["guitarra", "guitar", "guitarra acustica", "guitarra electrica"],
+  piano: ["piano", "teclado", "keyboard"],
+  canto: ["canto", "voz", "vocal", "tecnica vocal"],
+  violin: ["violin"],
+  bajo: ["bajo", "bass", "bajo electrico"],
+};
+
+const RESOURCE_INSTRUMENT_TERMS = new Set(
+  Object.entries(RESOURCE_INSTRUMENT_ALIASES).flatMap(([instrument, aliases]) => [
+    normalizeResourceText(instrument),
+    ...aliases.map((alias) => normalizeResourceText(alias)),
+  ])
+);
+
+function splitSearchTerms(value = "") {
+  return normalizeResourceText(value)
+    .split(/[^a-z0-9]+/g)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 3);
+}
+
+function expandResourceTerms(values = []) {
+  const terms = new Set();
+
+  for (const value of values) {
+    const normalized = normalizeResourceText(value);
+    if (!normalized) continue;
+
+    terms.add(normalized);
+    splitSearchTerms(normalized).forEach((term) => terms.add(term));
+  }
+
+  for (const term of [...terms]) {
+    const aliases = RESOURCE_INSTRUMENT_ALIASES[term] || [];
+    aliases.map((alias) => normalizeResourceText(alias)).forEach((alias) => terms.add(alias));
+  }
+
+  return [...terms].filter(Boolean);
+}
+
+function collectStudentResourceTerms(student = null) {
   if (!student) return [];
 
-  return unique(
-    [
-      student.area,
-      student.instrument,
-      student.instrumento,
-      student.program,
-      student.programa,
-      student.process,
-      student.proceso,
-    ]
-      .map((item) => normalizeAreaText(item))
-      .filter(Boolean)
+  const processes = normalizeStudentProcesses(student);
+
+  return expandResourceTerms([
+    student.area,
+    student.instrument,
+    student.instrumento,
+    student.program,
+    student.programa,
+    student.process,
+    student.proceso,
+    ...processes.flatMap((process) => [
+      process.arte,
+      process.detalle,
+      process.label,
+      process.instrument,
+      process.instrumento,
+      process.program,
+      process.programa,
+    ]),
+  ]);
+}
+
+function collectResourceTerms(resource = {}) {
+  return expandResourceTerms([
+    resource.area,
+    resource.instrument,
+    resource.instrumento,
+    resource.program,
+    resource.programa,
+    resource.category,
+    resource.categoria,
+    resource.folder,
+    resource.carpeta,
+    resource.tema,
+    resource.type,
+    resource.tipo,
+    resource.title,
+    resource.titulo,
+    resource.description,
+    resource.descripcion,
+    ...safeArray(resource.tags || resource.etiquetas),
+  ]);
+}
+
+function hasTermMatch(resourceTerms = [], studentTerms = []) {
+  const preciseStudentTerms = studentTerms.filter((term) => !BROAD_MUSIC_TERMS.has(term));
+  const preciseResourceTerms = resourceTerms.filter((term) => !BROAD_MUSIC_TERMS.has(term));
+
+  return preciseStudentTerms.some((studentTerm) =>
+    preciseResourceTerms.some((resourceTerm) =>
+      resourceTerm === studentTerm ||
+      resourceTerm.includes(studentTerm) ||
+      studentTerm.includes(resourceTerm)
+    )
   );
 }
 
+function isMusicStudent(studentTerms = []) {
+  return studentTerms.some((term) =>
+    term === "musica" ||
+    term.includes("musica") ||
+    term === "musical" ||
+    term.includes("musical")
+  );
+}
+
+function isMusicTheoryResource(resourceTerms = []) {
+  return MUSIC_THEORY_TERMS.some((theoryTerm) =>
+    resourceTerms.some((resourceTerm) =>
+      resourceTerm === theoryTerm ||
+      resourceTerm.includes(theoryTerm)
+    )
+  );
+}
+
+function targetsAnotherInstrument(resourceTerms = [], studentTerms = []) {
+  const resourceInstruments = resourceTerms.filter((term) =>
+    RESOURCE_INSTRUMENT_TERMS.has(term)
+  );
+
+  if (!resourceInstruments.length) return false;
+
+  return !resourceInstruments.some((resourceInstrument) =>
+    studentTerms.some((studentTerm) =>
+      resourceInstrument === studentTerm ||
+      resourceInstrument.includes(studentTerm) ||
+      studentTerm.includes(resourceInstrument)
+    )
+  );
+}
+
+function getStudentAreas(student) {
+  return unique(collectStudentResourceTerms(student));
+}
+
 function resourceMatchesStudent(resource, student) {
-  const resourceArea = normalizeAreaText(
+  const resourceScopeTerms = expandResourceTerms([
+    resource.area,
+    resource.instrument,
+    resource.instrumento,
+    resource.program,
+    resource.programa,
+  ]);
+
+  if (!resourceScopeTerms.length) return false;
+
+  const strictStudentAreas = getStudentAreas(student);
+
+  if (!strictStudentAreas.length) return true;
+
+  const concreteStudentAreas = strictStudentAreas.filter((studentTerm) =>
+    !BROAD_MUSIC_TERMS.has(studentTerm) &&
+    !studentTerm.includes("musica") &&
+    !studentTerm.includes("musical")
+  );
+
+  if (!concreteStudentAreas.length) return false;
+
+  return resourceScopeTerms.some((resourceTerm) =>
+    concreteStudentAreas.some((studentTerm) =>
+      resourceTerm === studentTerm ||
+      resourceTerm.includes(studentTerm) ||
+      studentTerm.includes(resourceTerm)
+    )
+  );
+
+  const resourceArea = normalizeResourceText(
     resource.area ||
     resource.instrument ||
     resource.instrumento ||
@@ -1448,11 +1662,14 @@ function resourceMatchesStudent(resource, student) {
     Coincidencia flexible: "guitarra" empata con "Guitarra Acústica",
     "violín" con "violin", etc.
   */
-  return studentAreas.some(
-    (value) =>
-      value === resourceArea ||
-      value.includes(resourceArea) ||
-      resourceArea.includes(value)
+  const resourceTerms = collectResourceTerms(resource);
+
+  if (hasTermMatch(resourceTerms, studentAreas)) return true;
+
+  return (
+    isMusicStudent(studentAreas) &&
+    isMusicTheoryResource(resourceTerms) &&
+    !targetsAnotherInstrument(resourceTerms, studentAreas)
   );
 }
 
