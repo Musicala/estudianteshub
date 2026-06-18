@@ -8,7 +8,7 @@
 ============================================================================= */
 
 const APP_NAME = "estudiantes-hub-musicala";
-const CACHE_VERSION = "v1.3.1";
+const CACHE_VERSION = "v1.4.0";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;
@@ -86,6 +86,19 @@ function isStaticAsset(request) {
   return STATIC_EXTENSIONS.some((extension) =>
     url.pathname.toLowerCase().endsWith(extension)
   );
+}
+
+/*
+  Código de la app (JS, CSS, manifest, HTML): SIEMPRE se intenta traer
+  fresco de la red. Así nadie se queda con una versión vieja en caché
+  (el problema típico en iPhone). El caché solo se usa si no hay internet.
+*/
+const CODE_EXTENSIONS = [".js", ".mjs", ".css", ".json", ".webmanifest", ".html"];
+
+function isCodeAsset(request) {
+  const url = new URL(request.url);
+  const pathname = url.pathname.toLowerCase();
+  return CODE_EXTENSIONS.some((extension) => pathname.endsWith(extension));
 }
 
 async function safeCacheAdd(cache, path) {
@@ -171,6 +184,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // El código de la app va primero a la red para garantizar la última versión.
+  if (isCodeAsset(request)) {
+    event.respondWith(networkFirstCode(request));
+    return;
+  }
+
+  // Imágenes y fuentes (cambian poco): caché rápido y actualización en segundo plano.
   if (isStaticAsset(request)) {
     event.respondWith(staleWhileRevalidate(request));
     return;
@@ -284,6 +304,32 @@ async function staleWhileRevalidate(request) {
     .catch(() => null);
 
   return cachedResponse || fetchPromise || Response.error();
+}
+
+/* -----------------------------------------------------------------------------
+  Código de la app (JS / CSS / manifest):
+  Intenta SIEMPRE la red para servir la última versión. Guarda una copia en
+  caché solo como respaldo para cuando no haya internet.
+----------------------------------------------------------------------------- */
+
+async function networkFirstCode(request) {
+  const cache = await caches.open(STATIC_CACHE);
+
+  try {
+    const networkResponse = await fetch(request, { cache: "no-store" });
+
+    if (networkResponse && networkResponse.ok) {
+      await cache.put(request, networkResponse.clone());
+    }
+
+    return networkResponse;
+  } catch (error) {
+    const cachedResponse = await cache.match(request);
+
+    if (cachedResponse) return cachedResponse;
+
+    return Response.error();
+  }
 }
 
 /* -----------------------------------------------------------------------------

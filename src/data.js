@@ -350,16 +350,47 @@ export function dedupeStudents(records = [], options = {}) {
   return dedupeStudentRecords(records, options);
 }
 
+/*
+  Busca la fecha de la bitácora aunque el editor la haya guardado con otro
+  nombre de campo. Primero prueba los nombres conocidos; si no, recorre
+  cualquier campo cuyo nombre sugiera fecha y que sí sea una fecha válida.
+*/
+function resolveBitacoraDate(raw = {}) {
+  const known = [
+    raw.fechaClase,
+    raw.fechaDeClase,
+    raw.fecha_clase,
+    raw.classDate,
+    raw.date,
+    raw.fecha,
+    raw.dia,
+    raw.timestamp,
+    raw.createdAt,
+    raw.fechaCreacion,
+    raw.updatedAt,
+    // Bitácoras importadas guardan la fecha de importación en metadata.
+    raw.metadata?.importedAt,
+    raw.importedAt,
+  ];
+
+  for (const value of known) {
+    if (value && toDateMaybe(value)) return value;
+  }
+
+  // Último recurso: cualquier campo que "huela" a fecha y sea parseable.
+  for (const [key, value] of Object.entries(raw)) {
+    if (!value) continue;
+    if (!/fecha|date|dia|timestamp/i.test(key)) continue;
+    if (toDateMaybe(value)) return value;
+  }
+
+  return null;
+}
+
 export function normalizeBitacora(raw = null) {
   if (!raw) return null;
 
-  const fechaClase =
-    raw.fechaClase ||
-    raw.date ||
-    raw.fecha ||
-    raw.createdAt ||
-    raw.updatedAt ||
-    null;
+  const fechaClase = resolveBitacoraDate(raw);
 
   const title =
     raw.title ||
@@ -1244,6 +1275,114 @@ export function resolveRouteArtKey(student = null) {
   return normalized;
 }
 
+function slugifyArt(value = "") {
+  return safeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/*
+  Lista de posibles ids de plantilla (artKey) para un estudiante. Probamos
+  varias porque el editor de Bitácoras pudo guardar la plantilla con un nombre
+  ligeramente distinto (con/sin tilde, "guitarra-acustica", "musica", etc.).
+*/
+function buildRouteArtKeyCandidates(student = null) {
+  const activeProcess =
+    resolveStudentProcess(student) ||
+    normalizeStudentProcesses(student)[0] ||
+    null;
+
+  const rawValues = [
+    resolveRouteArtKey(student),
+    activeProcess?.detalle,
+    activeProcess?.instrumento,
+    activeProcess?.instrument,
+    activeProcess?.arte,
+    activeProcess?.programa,
+    activeProcess?.program,
+    activeProcess?.label,
+    student?.instrumento,
+    student?.instrument,
+    student?.area,
+    student?.programa,
+    student?.program,
+  ];
+
+  const candidates = [];
+  for (const value of rawValues) {
+    const slug = slugifyArt(value);
+    if (slug && !candidates.includes(slug)) candidates.push(slug);
+  }
+
+  return candidates;
+}
+
+/*
+  Si no encontramos plantilla con los ids candidatos, leemos la colección
+  completa de route_templates (es pequeña) y emparejamos por similitud entre
+  el arte del estudiante y los datos de cada plantilla. Así la ruta se conecta
+  aunque el id no coincida exactamente.
+*/
+async function findRouteTemplateByMatch(student = null) {
+  try {
+    const studentTerms = expandResourceTerms(
+      buildRouteArtKeyCandidates(student).concat(collectStudentResourceTerms(student))
+    ).filter((term) => !BROAD_MUSIC_TERMS.has(term));
+
+    if (!studentTerms.length) return null;
+
+    const templatesRef = collection(db, COLLECTIONS.routeTemplates);
+    const snap = await getDocs(query(templatesRef, limit(100)));
+    if (snap.empty) return null;
+
+    let best = null;
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const templateTerms = expandResourceTerms([
+        docSnap.id,
+        data.routeTemplateId,
+        data.areaKey,
+        data.instrumentKey,
+        data.artKey,
+        data.arte,
+        data.area,
+        data.instrumento,
+        data.instrument,
+        data.programa,
+        data.program,
+        data.focusArea,
+        data.processLabel,
+        data.routeName,
+      ]).filter((term) => !BROAD_MUSIC_TERMS.has(term));
+
+      const score = templateTerms.reduce((acc, term) => {
+        const hit = studentTerms.some(
+          (st) => st === term || st.includes(term) || term.includes(st)
+        );
+        return acc + (hit ? 1 : 0);
+      }, 0);
+
+      const goalsCount = Array.isArray(data.goals)
+        ? data.goals.length
+        : Array.isArray(data.customGoals)
+          ? data.customGoals.length
+          : 0;
+
+      if (score > 0 && (!best || score > best.score)) {
+        best = { artKey: docSnap.id, template: data, score, goalsCount };
+      }
+    });
+
+    return best;
+  } catch (error) {
+    return null;
+  }
+}
+
 function normalizeLearningGoal(raw = {}, index = 0, sets = {}) {
   if (!raw || typeof raw !== "object") return null;
 
@@ -1377,17 +1516,42 @@ export async function getStudentLearningRoute(student = null, options = {}) {
     const studentId = getStudentIdentity(student);
     if (!studentId) return null;
 
-    const artKey = safeText(options.artKey) || resolveRouteArtKey(student);
+    // Probamos varios ids posibles de plantilla (no solo uno), porque el editor
+    // pudo guardarla con un nombre ligeramente distinto.
+    const candidates = options.artKey
+      ? [safeText(options.artKey)]
+      : buildRouteArtKeyCandidates(student);
+
+    let artKey = null;
+    let template = null;
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const snap = await getDoc(doc(db, COLLECTIONS.routeTemplates, candidate)).catch(() => null);
+      if (snap?.exists()) {
+        artKey = candidate;
+        template = snap.data();
+        break;
+      }
+    }
+
+    // Si ningún id coincidió, emparejamos por similitud con toda la colección.
+    if (!template) {
+      const match = await findRouteTemplateByMatch(student);
+      if (match) {
+        artKey = match.artKey;
+        template = match.template;
+      }
+    }
+
+    // Último recurso: usamos el artKey derivado para al menos buscar progreso.
+    if (!artKey) artKey = candidates[0] || resolveRouteArtKey(student);
     if (!artKey) return null;
 
     const progressDocId = `${studentId}__${artKey}`;
-
-    const [templateSnap, progressSnap] = await Promise.all([
-      getDoc(doc(db, COLLECTIONS.routeTemplates, artKey)).catch(() => null),
-      getDoc(doc(db, COLLECTIONS.studentRouteProgress, progressDocId)).catch(() => null),
-    ]);
-
-    const template = templateSnap?.exists() ? templateSnap.data() : null;
+    const progressSnap = await getDoc(
+      doc(db, COLLECTIONS.studentRouteProgress, progressDocId)
+    ).catch(() => null);
     const progress = progressSnap?.exists() ? progressSnap.data() : null;
 
     if (!template && !progress) return null;
@@ -1621,21 +1785,25 @@ function resourceMatchesStudent(resource, student) {
     resource.programa,
   ]);
 
-  if (!resourceScopeTerms.length) return false;
+  // Recurso sin área/instrumento definido: material general, visible para todos.
+  if (!resourceScopeTerms.length) return true;
 
-  const strictStudentAreas = getStudentAreas(student);
+  const studentAreas = getStudentAreas(student);
 
-  if (!strictStudentAreas.length) return true;
+  // Si no sabemos el área del estudiante, mostramos todo en vez de ocultar.
+  if (!studentAreas.length) return true;
 
-  const concreteStudentAreas = strictStudentAreas.filter((studentTerm) =>
+  const concreteStudentAreas = studentAreas.filter((studentTerm) =>
     !BROAD_MUSIC_TERMS.has(studentTerm) &&
     !studentTerm.includes("musica") &&
     !studentTerm.includes("musical")
   );
 
-  if (!concreteStudentAreas.length) return false;
+  // Estudiante sin área concreta (solo "música"): mostramos todo el material.
+  if (!concreteStudentAreas.length) return true;
 
-  return resourceScopeTerms.some((resourceTerm) =>
+  // Coincidencia directa de área/instrumento.
+  const scopeMatch = resourceScopeTerms.some((resourceTerm) =>
     concreteStudentAreas.some((studentTerm) =>
       resourceTerm === studentTerm ||
       resourceTerm.includes(studentTerm) ||
@@ -1643,24 +1811,12 @@ function resourceMatchesStudent(resource, student) {
     )
   );
 
-  const resourceArea = normalizeResourceText(
-    resource.area ||
-    resource.instrument ||
-    resource.instrumento ||
-    resource.program ||
-    resource.programa
-  );
-
-  /* Recursos sin área son material general visible para todos. */
-  if (!resourceArea) return true;
-
-  const studentAreas = getStudentAreas(student);
-
-  if (!studentAreas.length) return true;
+  if (scopeMatch) return true;
 
   /*
-    Coincidencia flexible: "guitarra" empata con "Guitarra Acústica",
-    "violín" con "violin", etc.
+    Coincidencia flexible adicional usando todos los textos del recurso
+    (categoría, tema, título, etiquetas…). Y para estudiantes de música,
+    el material de teoría/lenguaje musical es común a todos los instrumentos.
   */
   const resourceTerms = collectResourceTerms(resource);
 

@@ -431,8 +431,36 @@
 
       if (!canUseServiceWorker) return;
 
+      // Cuando un Service Worker nuevo toma el control, recargamos una sola vez
+      // para que TODOS (incluido iPhone) vean la última versión sin "recargar duro".
+      let hasReloadedForUpdate = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hasReloadedForUpdate) return;
+        hasReloadedForUpdate = true;
+        window.location.reload();
+      });
+
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch((error) => {
+        navigator.serviceWorker.register('./sw.js').then((registration) => {
+          // Si encontramos una versión nueva, la activamos de inmediato.
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                newWorker.postMessage({ type: 'SKIP_WAITING' });
+              }
+            });
+          });
+
+          // Revisamos si hay actualización al abrir y cada vez que la app vuelve al frente.
+          registration.update().catch(() => {});
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+              registration.update().catch(() => {});
+            }
+          });
+        }).catch((error) => {
           console.warn('[Estudiantes HUB] No se pudo registrar el Service Worker:', error);
         });
       });

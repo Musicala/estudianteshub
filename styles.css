@@ -1526,6 +1526,81 @@ ol {
   Bitácoras
 -------------------------------------------------------------------------- */
 
+.journal-search {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(170px, 0.38fr) minmax(155px, 0.32fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.journal-search__field,
+.journal-search__select-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.journal-search__icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  z-index: 1;
+  color: var(--muted);
+  font-size: var(--fs-16);
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.journal-search__input,
+.journal-search__select {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.journal-search__input {
+  padding: 10px 14px 10px 40px;
+}
+
+.journal-search__select {
+  padding: 10px 34px 10px 14px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 20px,
+    calc(100% - 13px) 20px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.journal-search__input:focus,
+.journal-search__select:focus {
+  outline: none;
+  border-color: var(--mozart);
+  box-shadow: 0 0 0 3px rgba(12, 65, 196, 0.14);
+}
+
+.journal-search__status {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: var(--fs-12);
+  font-weight: 700;
+}
+
+.journal-search__empty {
+  margin-top: 14px;
+}
+
 .journal-card {
   padding: 15px;
   border: 1px solid var(--line-soft);
@@ -1661,6 +1736,10 @@ ol {
 }
 
 @media (max-width: 720px) {
+  .journal-search {
+    grid-template-columns: 1fr;
+  }
+
   .bitacora-sections {
     grid-template-columns: 1fr;
   }
@@ -1774,6 +1853,42 @@ ol {
   font-size: var(--fs-13);
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.resource-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.resource-search__icon {
+  position: absolute;
+  left: 14px;
+  font-size: 0.95rem;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.resource-search__input {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 16px 10px 40px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+  box-shadow: var(--shadow-sm);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.resource-search__input:focus {
+  outline: none;
+  border-color: var(--brand, #4f46e5);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18);
 }
 
 .resource-board {

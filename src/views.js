@@ -1218,13 +1218,61 @@ function parseBitacoraSections(content = "") {
   return { intro, sections };
 }
 
+function normalizeSearchText(value = "") {
+  return uiSafeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getBitacoraSectionLabels(content = "") {
+  return parseBitacoraSections(content)
+    .sections
+    .map((section) => {
+      const key = bitacoraSectionKey(section.rawLabel);
+      const meta = BITACORA_SECTION_META[key];
+      return meta?.label || titleCaseLabel(section.rawLabel);
+    })
+    .filter(Boolean);
+}
+
+function getBitacoraMonthKey(value) {
+  const date = toDateMaybe(value);
+  if (!date) return "";
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function getBitacoraSearchText(item = {}) {
+  const date = item.fechaClase || item.date || item.createdAt;
+  const content = getBitacoraContent(item);
+  const labels = getBitacoraSectionLabels(content);
+
+  return normalizeSearchText(joinClean([
+    getBitacoraTitle(item),
+    getAuthorName(item),
+    getProcessLabel(item),
+    formatDate(date),
+    getBitacoraMonthKey(date),
+    labels.join(" "),
+    content,
+    asArray(item.tags).join(" "),
+  ], " "));
+}
+
 function bitacoraSectionValueHTML(value = "") {
   const text = uiSafeText(value, "");
   if (!text) return `<span class="bitacora-section__empty">Sin registro</span>`;
 
-  // Varias piezas cortas separadas por coma → lista legible.
+  // Solo convertimos a lista cuando de verdad parece una enumeración corta
+  // (3+ ítems breves, p. ej. acordes u obras). Así no partimos frases normales
+  // que llevan comas en viñetas sueltas.
   const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
-  const asList = parts.length >= 2 && parts.every((part) => part.length <= 90);
+  const asList = parts.length >= 3 && parts.every((part) => part.length <= 40);
 
   if (asList) {
     return `<ul class="bitacora-section__list">${parts
@@ -1326,15 +1374,71 @@ async function renderJournal(deps) {
     { columns: "3" }
   );
 
+  const categoryOptions = Array.from(new Set(
+    bitacoras.flatMap((item) => getBitacoraSectionLabels(getBitacoraContent(item)))
+  )).sort((a, b) => a.localeCompare(b, "es"));
+
+  const monthOptions = Array.from(new Map(
+    bitacoras
+      .map((item) => item.fechaClase || item.date || item.createdAt)
+      .map((date) => [getBitacoraMonthKey(date), formatDate(date, "es-CO", { month: "long", year: "numeric" })])
+      .filter(([key]) => Boolean(key))
+  ).entries());
+
+  const filtersHTML = `
+    <div class="journal-search" role="search" aria-label="Buscar en bitácoras">
+      <label class="journal-search__field" for="journalSearchInput">
+        <span class="journal-search__icon" aria-hidden="true">⌕</span>
+        <input
+          id="journalSearchInput"
+          class="journal-search__input"
+          type="search"
+          placeholder="Buscar por actividad, obra, docente, fecha o palabra clave"
+          autocomplete="off"
+          data-journal-search
+        />
+      </label>
+
+      <label class="journal-search__select-wrap" for="journalCategoryFilter">
+        <span class="sr-only">Categoría</span>
+        <select id="journalCategoryFilter" class="journal-search__select" data-journal-category>
+          <option value="">Todas las categorías</option>
+          ${categoryOptions.map((label) => `<option value="${escapeAttr(normalizeSearchText(label))}">${escapeHtml(label)}</option>`).join("")}
+        </select>
+      </label>
+
+      <label class="journal-search__select-wrap" for="journalMonthFilter">
+        <span class="sr-only">Mes</span>
+        <select id="journalMonthFilter" class="journal-search__select" data-journal-month>
+          <option value="">Todas las fechas</option>
+          ${monthOptions.map(([key, label]) => `<option value="${escapeAttr(key)}">${escapeHtml(label)}</option>`).join("")}
+        </select>
+      </label>
+    </div>
+
+    <div class="journal-search__status" data-journal-status>
+      Mostrando ${escapeHtml(String(bitacoras.length))} bitácoras.
+    </div>
+  `;
+
   const listHTML = bitacoras.map((item) => {
     const id = uiSafeText(item.id);
     const date = item.fechaClase || item.date || item.createdAt;
     const author = getAuthorName(item);
     const process = getProcessLabel(item);
     const content = getBitacoraContent(item);
+    const searchText = getBitacoraSearchText(item);
+    const sectionFilters = getBitacoraSectionLabels(content).map(normalizeSearchText).join(" ");
+    const monthKey = getBitacoraMonthKey(date);
 
     return `
-      <article class="journal-card">
+      <article
+        class="journal-card"
+        data-journal-entry
+        data-journal-search-text="${escapeAttr(searchText)}"
+        data-journal-categories="${escapeAttr(sectionFilters)}"
+        data-journal-month="${escapeAttr(monthKey)}"
+      >
         <div class="journal-card__top">
           <div>
             <div class="journal-card__date">${escapeHtml(formatDate(date))}</div>
@@ -1379,15 +1483,71 @@ async function renderJournal(deps) {
         ${card({
           title: "Entradas de clase",
           subtitle: "Histórico de registros pedagógicos del estudiante.",
-          bodyHTML: `<div class="stack">${listHTML}</div>`,
+          bodyHTML: `
+            ${filtersHTML}
+            <div class="stack" data-journal-list>${listHTML}</div>
+            <div class="empty journal-search__empty" data-journal-empty hidden>
+              <div class="empty__icon" aria-hidden="true">⌕</div>
+              <h3 class="empty__title">Sin coincidencias</h3>
+              <p class="empty__text">Prueba con otra palabra, categoría o fecha.</p>
+            </div>
+          `,
         })}
       `)}
     `,
 
     afterRender: () => {
       wireBitacoraModals(bitacoras);
+      wireJournalSearch();
     },
   };
+}
+
+function wireJournalSearch() {
+  const root = viewRoot();
+  if (!root) return;
+
+  const input = root.querySelector("[data-journal-search]");
+  const category = root.querySelector("[data-journal-category]");
+  const month = root.querySelector("[data-journal-month]");
+  const entries = Array.from(root.querySelectorAll("[data-journal-entry]"));
+  const status = root.querySelector("[data-journal-status]");
+  const empty = root.querySelector("[data-journal-empty]");
+
+  if (!entries.length || (!input && !category && !month)) return;
+
+  const applyFilters = () => {
+    const query = normalizeSearchText(input?.value || "");
+    const categoryValue = category?.value || "";
+    const monthValue = month?.value || "";
+    let visible = 0;
+
+    entries.forEach((entry) => {
+      const text = entry.getAttribute("data-journal-search-text") || "";
+      const categories = entry.getAttribute("data-journal-categories") || "";
+      const entryMonth = entry.getAttribute("data-journal-month") || "";
+      const matchesQuery = !query || text.includes(query);
+      const matchesCategory = !categoryValue || categories.includes(categoryValue);
+      const matchesMonth = !monthValue || entryMonth === monthValue;
+      const shouldShow = matchesQuery && matchesCategory && matchesMonth;
+
+      entry.hidden = !shouldShow;
+      if (shouldShow) visible += 1;
+    });
+
+    if (status) {
+      status.textContent = visible === entries.length
+        ? `Mostrando ${entries.length} bitácoras.`
+        : `${visible} de ${entries.length} bitácoras encontradas.`;
+    }
+
+    if (empty) empty.hidden = visible !== 0;
+  };
+
+  input?.addEventListener("input", applyFilters);
+  category?.addEventListener("change", applyFilters);
+  month?.addEventListener("change", applyFilters);
+  applyFilters();
 }
 
 function wireBitacoraModals(bitacoras = []) {
@@ -1562,7 +1722,25 @@ async function renderResources(deps) {
     });
   }).join("");
 
-  return `
+  const searchHTML = `
+    <div class="resource-search">
+      <span class="resource-search__icon" aria-hidden="true">🔎</span>
+      <input
+        id="resourceSearch"
+        class="resource-search__input"
+        type="search"
+        inputmode="search"
+        autocomplete="off"
+        placeholder="Buscar recurso por nombre, tema o tipo…"
+        aria-label="Buscar recursos"
+      />
+    </div>
+    <p id="resourceSearchEmpty" class="note" hidden>
+      No encontramos recursos con ese término. Prueba con otra palabra.
+    </p>
+  `;
+
+  const html = `
     ${viewHeader("Recursos", studentSubtitle(ctx), {
       eyebrow: "Material de apoyo",
     })}
@@ -1572,6 +1750,7 @@ async function renderResources(deps) {
         title: "Explorar recursos",
         subtitle: "Encuentra materiales de tu área organizados por tema.",
         bodyHTML: `
+          ${searchHTML}
           ${renderResourceOverview(areaGroups)}
           ${typeChips}
           ${categoryChips}
@@ -1587,6 +1766,59 @@ async function renderResources(deps) {
       })}
     `)}
   `;
+
+  return {
+    html,
+    afterRender: () => wireResourceSearch(),
+  };
+}
+
+/*
+  Filtro en vivo de recursos. Oculta los ítems que no coinciden con el texto
+  y, de paso, esconde las áreas/categorías que quedan vacías.
+*/
+function wireResourceSearch() {
+  const root = viewRoot();
+  if (!root) return;
+
+  const input = root.querySelector("#resourceSearch");
+  const emptyNote = root.querySelector("#resourceSearchEmpty");
+  if (!input) return;
+
+  const normalize = (value = "") =>
+    String(value)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "");
+
+  // Tarjetas del tablero (.resource-card) e ítems del índice (.item).
+  const items = Array.from(root.querySelectorAll(".resource-card, .item"));
+
+  const apply = () => {
+    const query = normalize(input.value.trim());
+    let anyVisible = false;
+
+    items.forEach((item) => {
+      const match = !query || normalize(item.textContent).includes(query);
+      item.hidden = !match;
+      if (match) anyVisible = true;
+    });
+
+    // Áreas y categorías: se ocultan si ya no tienen tarjetas visibles.
+    root.querySelectorAll(".resource-category, .resource-area").forEach((section) => {
+      const hasVisible = Array.from(
+        section.querySelectorAll(".resource-card, .item")
+      ).some((item) => !item.hidden);
+      section.hidden = !hasVisible;
+      if (query && hasVisible && section.tagName === "DETAILS") {
+        section.open = true;
+      }
+    });
+
+    if (emptyNote) emptyNote.hidden = anyVisible || !query;
+  };
+
+  input.addEventListener("input", apply);
 }
 
 /* =============================================================================
