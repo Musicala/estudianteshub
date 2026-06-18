@@ -1642,7 +1642,12 @@ const RESOURCE_INSTRUMENT_ALIASES = {
   piano: ["piano", "teclado", "keyboard"],
   canto: ["canto", "voz", "vocal", "tecnica vocal"],
   violin: ["violin"],
+  cello: ["cello", "violoncello", "chelo"],
   bajo: ["bajo", "bass", "bajo electrico"],
+  ukelele: ["ukelele", "ukulele"],
+  cuatro: ["cuatro"],
+  dibujo: ["dibujo", "artes plasticas", "arte visual"],
+  produccion: ["produccion musical", "produccion", "audio", "grabacion"],
 };
 
 const RESOURCE_INSTRUMENT_TERMS = new Set(
@@ -1772,6 +1777,22 @@ function targetsAnotherInstrument(resourceTerms = [], studentTerms = []) {
   );
 }
 
+function targetsStudentInstrument(resourceTerms = [], studentTerms = []) {
+  const resourceInstruments = resourceTerms.filter((term) =>
+    RESOURCE_INSTRUMENT_TERMS.has(term)
+  );
+
+  if (!resourceInstruments.length) return false;
+
+  return resourceInstruments.some((resourceInstrument) =>
+    studentTerms.some((studentTerm) =>
+      resourceInstrument === studentTerm ||
+      resourceInstrument.includes(studentTerm) ||
+      studentTerm.includes(resourceInstrument)
+    )
+  );
+}
+
 function getStudentAreas(student) {
   return unique(collectStudentResourceTerms(student));
 }
@@ -1786,8 +1807,6 @@ function resourceMatchesStudent(resource, student) {
   ]);
 
   // Recurso sin área/instrumento definido: material general, visible para todos.
-  if (!resourceScopeTerms.length) return true;
-
   const studentAreas = getStudentAreas(student);
 
   // Si no sabemos el área del estudiante, mostramos todo en vez de ocultar.
@@ -1801,6 +1820,18 @@ function resourceMatchesStudent(resource, student) {
 
   // Estudiante sin área concreta (solo "música"): mostramos todo el material.
   if (!concreteStudentAreas.length) return true;
+
+  const resourceTerms = collectResourceTerms(resource);
+
+  if (!resourceScopeTerms.length) {
+    if (targetsStudentInstrument(resourceTerms, studentAreas)) return true;
+
+    return (
+      isMusicStudent(studentAreas) &&
+      isMusicTheoryResource(resourceTerms) &&
+      !targetsAnotherInstrument(resourceTerms, studentAreas)
+    );
+  }
 
   // Coincidencia directa de área/instrumento.
   const scopeMatch = resourceScopeTerms.some((resourceTerm) =>
@@ -1818,8 +1849,6 @@ function resourceMatchesStudent(resource, student) {
     (categoría, tema, título, etiquetas…). Y para estudiantes de música,
     el material de teoría/lenguaje musical es común a todos los instrumentos.
   */
-  const resourceTerms = collectResourceTerms(resource);
-
   if (hasTermMatch(resourceTerms, studentAreas)) return true;
 
   return (

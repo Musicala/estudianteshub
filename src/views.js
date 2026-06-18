@@ -360,6 +360,35 @@ function renderResourceAreaSection(area = "", resources = [], index = 0) {
   `;
 }
 
+function renderResourceTopicSection(topic = "", resources = [], index = 0) {
+  const defaultOpen = index === 0 ? " open" : "";
+
+  return `
+    <details
+      class="resource-area"
+      id="resources-topic-${escapeAttr(slugify(topic))}"
+      ${defaultOpen}
+    >
+      <summary class="resource-area__summary">
+        <span>
+          <span class="resource-area__eyebrow">Categoría</span>
+          <strong>${escapeHtml(topic)}</strong>
+        </span>
+        <span class="resource-area__meta">
+          ${escapeHtml(String(resources.length))}
+          ${resources.length === 1 ? "recurso" : "recursos"}
+        </span>
+      </summary>
+
+      <div class="resource-area__body">
+        ${grid(resources.map((resource) => resourceCard(resource)).join(""), {
+          className: "resource-grid",
+        })}
+      </div>
+    </details>
+  `;
+}
+
 function slugify(value = "") {
   return uiSafeText(value, "general")
     .normalize("NFD")
@@ -1682,20 +1711,11 @@ async function renderResources(deps) {
     `;
   }
 
-  const areaGroups = groupBy(resources, getResourceArea);
   const categoryGroups = groupBy(resources, getResourceCategory);
-
-  const typeChips = `
-    <div class="chips">
-      ${areaGroups.map(([area, list]) =>
-        chip(`${area}: ${list.length}`, "soft")
-      ).join("")}
-    </div>
-  `;
 
   const categoryChips = `
     <div class="chips">
-      ${categoryGroups.slice(0, 10).map(([category, list]) =>
+      ${categoryGroups.map(([category, list]) =>
         chip(`${category}: ${list.length}`, "ghost")
       ).join("")}
     </div>
@@ -1703,8 +1723,8 @@ async function renderResources(deps) {
 
   const resourceSections = `
     <div class="resource-board">
-      ${areaGroups.map(([area, list], index) =>
-        renderResourceAreaSection(area, list, index)
+      ${categoryGroups.map(([category, list], index) =>
+        renderResourceTopicSection(category, list, index)
       ).join("")}
     </div>
   `;
@@ -1751,8 +1771,6 @@ async function renderResources(deps) {
         subtitle: "Encuentra materiales de tu área organizados por tema.",
         bodyHTML: `
           ${searchHTML}
-          ${renderResourceOverview(areaGroups)}
-          ${typeChips}
           ${categoryChips}
         `,
       })}
