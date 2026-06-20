@@ -8,7 +8,13 @@
 ============================================================================= */
 
 const APP_NAME = "estudiantes-hub-musicala";
-const CACHE_VERSION = "v1.4.1";
+/*
+  IMPORTANTE — Cómo publicar una versión nueva para que TODOS la reciban:
+  Cada vez que subas cambios, sube este número (v1.5.0 -> v1.5.1, etc.).
+  Eso obliga al Service Worker a reinstalarse, limpiar el caché viejo y
+  recargar a los estudiantes a la última versión (también en iPhone).
+*/
+const CACHE_VERSION = "v1.5.0";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;

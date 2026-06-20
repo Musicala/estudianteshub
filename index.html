@@ -441,25 +441,45 @@
       });
 
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').then((registration) => {
+        // updateViaCache:'none' es CLAVE: obliga al navegador a pedir SIEMPRE el
+        // sw.js fresco a la red (sin usar su caché HTTP). Sin esto, iPhone/Android
+        // pueden quedarse con un Service Worker viejo que nunca se actualiza, y por
+        // eso a los estudiantes les seguía apareciendo una versión anterior.
+        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((registration) => {
           // Si encontramos una versión nueva, la activamos de inmediato.
+          function promoteWaitingWorker() {
+            const worker = registration.installing || registration.waiting;
+            if (!worker) return;
+            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+              worker.postMessage({ type: 'SKIP_WAITING' });
+            }
+          }
+
           registration.addEventListener('updatefound', () => {
             const newWorker = registration.installing;
             if (!newWorker) return;
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                newWorker.postMessage({ type: 'SKIP_WAITING' });
-              }
-            });
+            newWorker.addEventListener('statechange', promoteWaitingWorker);
           });
 
-          // Revisamos si hay actualización al abrir y cada vez que la app vuelve al frente.
-          registration.update().catch(() => {});
+          // Si al registrar ya había un SW nuevo esperando, lo activamos.
+          promoteWaitingWorker();
+
+          // Revisamos si hay actualización: al abrir, al volver al frente y de
+          // forma periódica (para sesiones/PWA que quedan abiertas mucho tiempo).
+          const checkForUpdate = () => registration.update().catch(() => {});
+
+          checkForUpdate();
+
           document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
-              registration.update().catch(() => {});
+              checkForUpdate();
             }
           });
+
+          window.addEventListener('online', checkForUpdate);
+
+          // Cada 30 minutos mientras la app esté abierta.
+          setInterval(checkForUpdate, 30 * 60 * 1000);
         }).catch((error) => {
           console.warn('[Estudiantes HUB] No se pudo registrar el Service Worker:', error);
         });
