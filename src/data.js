@@ -800,6 +800,160 @@ export async function updateUserCtx(emailOrId, patch = {}) {
 }
 
 /* =============================================================================
+  ACCESO POR CORREO (SUBCORREOS / ACUDIENTES)
+
+  Permite asignar correos adicionales a un mismo proceso de estudiante desde el
+  front del HUB. Los correos iniciales siguen viniendo de Bitácoras; esto solo
+  agrega correos extra (acudiente, segundo padre/madre, etc.) que verán el mismo
+  estudiante. Cada correo se guarda como users/{correo} con su studentIds.
+============================================================================= */
+
+const LINKED_ACCESS_ROLES = ["student", "estudiante", "acudiente", "guardian", "parent"];
+
+export async function listStudentEmailAccess(studentId) {
+  try {
+    const id = safeText(studentId);
+    assertNonEmptyString(id, "studentId");
+
+    const usersRef = collection(db, COLLECTIONS.users);
+    const student = await getStudent(id).catch(() => null);
+    const aliasIds = buildStudentAliasIds(student, id);
+
+    const byEmail = new Map();
+
+    for (const part of chunk(aliasIds, MAX_IN)) {
+      if (!part.length) continue;
+
+      for (const field of ["studentIds", "students"]) {
+        try {
+          const snap = await getDocs(
+            query(usersRef, where(field, "array-contains-any", part))
+          );
+
+          snap.docs.forEach((docItem) => {
+            const data = docItem.data() || {};
+            const email = normalizeEmail(data.email || data.correo || docItem.id);
+            if (!email) return;
+
+            byEmail.set(email, {
+              email,
+              role: safeText(data.role || data.rol || "acudiente"),
+              active: data.active !== false && data.estado !== "inactivo",
+              displayName: safeText(data.displayName || data.nombre || data.name),
+              linkedFromHub: Boolean(data.linkedFromHub),
+              studentIds: unique(
+                [
+                  ...safeArray(data.studentIds),
+                  ...safeArray(data.students),
+                  safeText(data.studentId),
+                ].map((value) => safeText(value))
+              ),
+            });
+          });
+        } catch (queryError) {
+          // Índice o permisos: seguimos con lo que se pueda leer.
+          console.warn(`[data] listStudentEmailAccess (${field}) parcial.`, queryError);
+        }
+      }
+    }
+
+    return [...byEmail.values()].sort((a, b) => a.email.localeCompare(b.email, "es"));
+  } catch (error) {
+    throw withContextError(error, "listStudentEmailAccess");
+  }
+}
+
+export async function addStudentEmailAccess(studentId, email, meta = {}) {
+  try {
+    const id = safeText(studentId);
+    assertNonEmptyString(id, "studentId");
+
+    const cleanEmail = normalizeEmail(email);
+    assertNonEmptyString(cleanEmail, "email");
+    if (!cleanEmail.includes("@") || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
+      throw new Error("El correo no es válido.");
+    }
+
+    const ref = doc(db, COLLECTIONS.users, cleanEmail);
+    const snap = await getDoc(ref);
+    const existing = snap.exists() ? snap.data() || {} : {};
+
+    const mergedStudentIds = unique(
+      [
+        ...safeArray(existing.studentIds),
+        ...safeArray(existing.students),
+        safeText(existing.studentId),
+        id,
+      ].map((value) => safeText(value))
+    );
+
+    const existingRole = safeText(existing.role || existing.rol).toLowerCase();
+    const role = LINKED_ACCESS_ROLES.includes(existingRole)
+      ? existingRole
+      : safeText(meta.role).toLowerCase() || "acudiente";
+
+    const payload = removeUndefinedFields({
+      email: cleanEmail,
+      role,
+      active: true,
+      studentIds: mergedStudentIds,
+      students: mergedStudentIds,
+      studentId: safeText(existing.studentId) || id,
+      displayName: safeText(existing.displayName) || safeText(meta.displayName) || "",
+      source: safeText(existing.source) || "estudiantes-hub",
+      linkedFromHub: true,
+      linkedBy: safeText(meta.actorEmail) || safeText(existing.linkedBy) || "",
+      updatedAt: serverTimestamp(),
+      ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
+    });
+
+    await setDoc(ref, payload, { merge: true });
+
+    return { email: cleanEmail, role, studentIds: mergedStudentIds };
+  } catch (error) {
+    throw withContextError(error, "addStudentEmailAccess");
+  }
+}
+
+export async function removeStudentEmailAccess(email, studentId) {
+  try {
+    const cleanEmail = normalizeEmail(email);
+    assertNonEmptyString(cleanEmail, "email");
+
+    const id = safeText(studentId);
+    const ref = doc(db, COLLECTIONS.users, cleanEmail);
+    const snap = await getDoc(ref);
+
+    if (!snap.exists()) return true;
+
+    const data = snap.data() || {};
+    const remaining = unique(
+      [
+        ...safeArray(data.studentIds),
+        ...safeArray(data.students),
+        safeText(data.studentId),
+      ].map((value) => safeText(value))
+    ).filter((sid) => sid && sid !== id);
+
+    await updateDoc(
+      ref,
+      removeUndefinedFields({
+        studentIds: remaining,
+        students: remaining,
+        studentId: remaining[0] || "",
+        // Si ya no le queda ningún estudiante vinculado, desactivamos el acceso.
+        active: remaining.length ? data.active !== false : false,
+        updatedAt: serverTimestamp(),
+      })
+    );
+
+    return true;
+  } catch (error) {
+    throw withContextError(error, "removeStudentEmailAccess");
+  }
+}
+
+/* =============================================================================
   STUDENTS
 ============================================================================= */
 
@@ -994,6 +1148,59 @@ export async function getPortalSettings() {
 }
 
 /* =============================================================================
+  ALIAS DE ESTUDIANTE PARA CONSULTAS
+
+  El editor de Bitácoras pudo etiquetar bitácoras/rutas con una llave distinta
+  a la que tiene el HUB (a veces el id del doc, a veces el documento, a veces un
+  studentKey). Para que "a unos sí, a otros no" deje de pasar, las consultas se
+  hacen contra TODAS las llaves conocidas del estudiante, no solo una.
+============================================================================= */
+
+function buildStudentAliasIds(student = null, baseId = "") {
+  return unique(
+    [
+      baseId,
+      getStudentIdentity(student),
+      student?.id,
+      student?.studentId,
+      student?.studentKey,
+      student?.estudianteId,
+      student?.documento,
+      ...safeArray(student?.duplicateRecords).flatMap((record) => [
+        record?.id,
+        record?.studentId,
+        record?.studentKey,
+        record?.estudianteId,
+        record?.documento,
+      ]),
+    ].map((value) => safeText(value))
+  );
+}
+
+/*
+  Devuelve la lista de ids con la que vale la pena consultar. Si quien llama ya
+  trae el objeto estudiante (caso de los bundles), no hacemos lecturas extra.
+*/
+async function resolveStudentAliasIds(idOrIds, options = {}) {
+  if (Array.isArray(options.aliasIds) && options.aliasIds.length) {
+    return unique(options.aliasIds.map((value) => safeText(value)));
+  }
+
+  const baseId = safeText(idOrIds);
+
+  let student =
+    options.student && typeof options.student === "object" ? options.student : null;
+
+  if (!student && baseId) {
+    student = await getStudent(baseId).catch(() => null);
+  }
+
+  const aliases = buildStudentAliasIds(student, baseId);
+
+  return aliases.length ? aliases : [baseId].filter(Boolean);
+}
+
+/* =============================================================================
   BITÁCORAS
 ============================================================================= */
 
@@ -1004,18 +1211,30 @@ export async function listBitacorasByStudent(studentId, options = {}) {
 
     const bitacorasRef = collection(db, COLLECTIONS.bitacoras);
 
+    const aliasIds = await resolveStudentAliasIds(id, options);
+
     /*
       Evitamos orderBy aquí para reducir fricción con índices compuestos.
       Se ordena en cliente por fechaClase / createdAt.
+
+      Consultamos por TODAS las llaves del estudiante con array-contains-any
+      (máx. 10 por consulta), y unimos resultados sin duplicar.
     */
-    const q = query(
-      bitacorasRef,
-      where("studentIds", "array-contains", id)
-    );
+    const byDocId = new Map();
 
-    const snap = await getDocs(q);
+    for (const part of chunk(aliasIds, MAX_IN)) {
+      if (!part.length) continue;
+      const q = query(
+        bitacorasRef,
+        where("studentIds", "array-contains-any", part)
+      );
+      const snap = await getDocs(q);
+      for (const docItem of snap.docs) {
+        byDocId.set(docItem.id, normalizeDocBase(docItem.id, docItem.data() || {}));
+      }
+    }
 
-    const items = docsToObjects(snap)
+    const items = [...byDocId.values()]
       .map((item) => normalizeBitacora(item))
       .filter(Boolean);
 
@@ -1073,9 +1292,10 @@ export async function getJournalEntry(_studentId, entryId) {
   return getBitacora(entryId);
 }
 
-export async function getRecentBitacoras(studentId, max = LIMITS?.maxRecentBitacorasHome || 3) {
+export async function getRecentBitacoras(studentId, max = LIMITS?.maxRecentBitacorasHome || 3, options = {}) {
   const items = await listBitacorasByStudent(studentId, {
     max: Math.max(max, 12),
+    ...options,
   });
 
   return items.slice(0, max);
@@ -1156,21 +1376,33 @@ export async function getStudentRoutes(studentId, options = {}) {
     const max = clampLimit(options.max, 20, 60);
     const routesRef = collection(db, COLLECTIONS.studentRoutes);
 
-    const primary = query(
-      routesRef,
-      where("studentId", "==", id),
-      limit(max)
-    );
+    const aliasIds = await resolveStudentAliasIds(id, options);
 
-    const snap = await getDocs(primary);
+    // Buscamos por todas las llaves del estudiante (in, máx. 10 por consulta).
+    const byDocId = new Map();
 
-    let routes = docsToObjects(snap)
+    for (const part of chunk(aliasIds, MAX_IN)) {
+      if (!part.length) continue;
+      const q = query(routesRef, where("studentId", "in", part), limit(max));
+      const snap = await getDocs(q);
+      for (const docItem of snap.docs) {
+        byDocId.set(docItem.id, normalizeDocBase(docItem.id, docItem.data() || {}));
+      }
+    }
+
+    let routes = [...byDocId.values()]
       .map((item) => normalizeStudentRoute(item))
       .filter(Boolean);
 
     if (!routes.length) {
-      const direct = await getStudentRoute(id, options.processKey || "general");
-      routes = direct ? [direct] : [];
+      // Respaldo por id de documento (studentId__processKey) con cada alias.
+      for (const aliasId of aliasIds) {
+        const direct = await getStudentRoute(aliasId, options.processKey || "general");
+        if (direct) {
+          routes = [direct];
+          break;
+        }
+      }
     }
 
     return sortByDate(routes, ["updatedAt", "createdAt"], "desc");
@@ -1548,11 +1780,19 @@ export async function getStudentLearningRoute(student = null, options = {}) {
     if (!artKey) artKey = candidates[0] || resolveRouteArtKey(student);
     if (!artKey) return null;
 
-    const progressDocId = `${studentId}__${artKey}`;
-    const progressSnap = await getDoc(
-      doc(db, COLLECTIONS.studentRouteProgress, progressDocId)
-    ).catch(() => null);
-    const progress = progressSnap?.exists() ? progressSnap.data() : null;
+    // El progreso se guarda como {studentId}__{artKey}, pero el editor pudo usar
+    // otra llave del estudiante. Probamos todas las llaves conocidas.
+    const aliasIds = buildStudentAliasIds(student, studentId);
+    let progress = null;
+    for (const aliasId of aliasIds) {
+      const progressSnap = await getDoc(
+        doc(db, COLLECTIONS.studentRouteProgress, `${aliasId}__${artKey}`)
+      ).catch(() => null);
+      if (progressSnap?.exists()) {
+        progress = progressSnap.data();
+        break;
+      }
+    }
 
     if (!template && !progress) return null;
 
@@ -1606,6 +1846,97 @@ const MUSIC_THEORY_TERMS = [
   "escalas",
   "acordes",
 ];
+
+/*
+  Artes distintas a la música. Sirven para bloquear que, por ejemplo, un
+  estudiante de música vea material de danza/teatro/plásticas (y viceversa).
+  El término "ritmo" aparece tanto en teoría musical como en danza, por eso
+  el bloqueo se decide por el ARTE del recurso (su área/instrumento/programa),
+  no por palabras sueltas del texto.
+*/
+const NON_MUSIC_ART_ALIASES = {
+  danza: [
+    "danza",
+    "danzas",
+    "baile",
+    "bailes",
+    "ballet",
+    "dancing",
+    "coreografia",
+    "coreografias",
+    "urbano",
+    "salsa",
+    "folclor",
+    "folclore",
+  ],
+  teatro: [
+    "teatro",
+    "teatral",
+    "actuacion",
+    "dramaturgia",
+    "improvisacion teatral",
+    "expresion corporal",
+  ],
+  "artes-plasticas": [
+    "artes plasticas",
+    "plastica",
+    "plasticas",
+    "dibujo",
+    "pintura",
+    "arte visual",
+    "artes visuales",
+    "manualidades",
+    "modelado",
+  ],
+};
+
+const NON_MUSIC_ART_TERMS = new Map();
+for (const [art, aliases] of Object.entries(NON_MUSIC_ART_ALIASES)) {
+  for (const alias of aliases) {
+    NON_MUSIC_ART_TERMS.set(normalizeResourceText(alias), art);
+  }
+}
+
+/*
+  Clasifica un término en un "arte": danza, teatro, artes-plasticas o musica.
+  Devuelve "" cuando el término no permite decidir (genérico).
+*/
+function detectArtFromTerm(term = "") {
+  const normalized = normalizeResourceText(term);
+  if (!normalized) return "";
+
+  // Artes no musicales primero (orden importa: "dibujo" no es instrumento).
+  if (NON_MUSIC_ART_TERMS.has(normalized)) {
+    return NON_MUSIC_ART_TERMS.get(normalized);
+  }
+  for (const [aliasTerm, art] of NON_MUSIC_ART_TERMS.entries()) {
+    if (normalized.includes(aliasTerm) || aliasTerm.includes(normalized)) {
+      return art;
+    }
+  }
+
+  if (RESOURCE_INSTRUMENT_TERMS.has(normalized)) return "musica";
+  if (BROAD_MUSIC_TERMS.has(normalized)) return "musica";
+  if (normalized.includes("musica") || normalized.includes("musical")) return "musica";
+  if (
+    MUSIC_THEORY_TERMS.some(
+      (theory) => normalized === theory || normalized.includes(theory)
+    )
+  ) {
+    return "musica";
+  }
+
+  return "";
+}
+
+function detectArts(terms = []) {
+  const arts = new Set();
+  for (const term of terms) {
+    const art = detectArtFromTerm(term);
+    if (art) arts.add(art);
+  }
+  return arts;
+}
 
 const RESOURCE_INSTRUMENT_ALIASES = {
   percusion: [
@@ -1812,19 +2143,55 @@ function resourceMatchesStudent(resource, student) {
   // Si no sabemos el área del estudiante, mostramos todo en vez de ocultar.
   if (!studentAreas.length) return true;
 
+  const studentArts = detectArts(studentAreas);
+
+  /*
+    Compuerta por ARTE: si el recurso está claramente marcado para un arte
+    (danza, teatro, plásticas o música) por su área/instrumento/programa, y ese
+    arte no es el del estudiante, se bloquea. Así un estudiante de música no ve
+    danza/teatro/plásticas y un estudiante de danza no ve material musical.
+  */
+  const scopeArts = detectArts(resourceScopeTerms);
+  if (scopeArts.size && studentArts.size) {
+    const sharesArt = [...scopeArts].some((art) => studentArts.has(art));
+    if (!sharesArt) return false;
+  }
+
   const concreteStudentAreas = studentAreas.filter((studentTerm) =>
     !BROAD_MUSIC_TERMS.has(studentTerm) &&
     !studentTerm.includes("musica") &&
     !studentTerm.includes("musical")
   );
 
-  // Estudiante sin área concreta (solo "música"): mostramos todo el material.
-  if (!concreteStudentAreas.length) return true;
-
   const resourceTerms = collectResourceTerms(resource);
 
+  // Estudiante sin instrumento concreto (solo "música"): mostramos material
+  // musical (de cualquier instrumento) y el material sin arte definido, pero
+  // no el de otras artes.
+  if (!concreteStudentAreas.length) {
+    if (!scopeArts.size) {
+      const looseArts = detectArts(resourceTerms);
+      if (looseArts.size && ![...looseArts].some((art) => studentArts.has(art))) {
+        return false;
+      }
+      return true;
+    }
+    return scopeArts.has("musica");
+  }
+
   if (!resourceScopeTerms.length) {
+    // Recurso sin scope: por instrumento del estudiante o teoría musical.
     if (targetsStudentInstrument(resourceTerms, studentAreas)) return true;
+
+    // Si los textos del recurso lo ubican claramente en otro arte, bloquear.
+    const looseArts = detectArts(resourceTerms);
+    if (
+      looseArts.size &&
+      studentArts.size &&
+      ![...looseArts].some((art) => studentArts.has(art))
+    ) {
+      return false;
+    }
 
     return (
       isMusicStudent(studentAreas) &&
@@ -1843,6 +2210,9 @@ function resourceMatchesStudent(resource, student) {
   );
 
   if (scopeMatch) return true;
+
+  // Dentro de la misma arte: si el recurso apunta a OTRO instrumento, bloquear.
+  if (targetsAnotherInstrument(resourceTerms, studentAreas)) return false;
 
   /*
     Coincidencia flexible adicional usando todos los textos del recurso
@@ -2232,9 +2602,9 @@ export async function getStudentPortalHome(studentId, options = {}) {
       resources,
       events,
     ] = await Promise.all([
-      getBestStudentRoute(queryStudentId).catch(() => null),
-      getStudentRoutes(queryStudentId).catch(() => []),
-      getRecentBitacoras(queryStudentId).then((items) => {
+      getBestStudentRoute(queryStudentId, { student }).catch(() => null),
+      getStudentRoutes(queryStudentId, { student }).catch(() => []),
+      getRecentBitacoras(queryStudentId, undefined, { student }).then((items) => {
         if (items.length || !fallbackStudentId || fallbackStudentId === queryStudentId) {
           return items;
         }
@@ -2281,10 +2651,11 @@ export async function getFullStudentPortalBundle(studentId) {
       events,
       catalogs,
     ] = await Promise.all([
-      getBestStudentRoute(id).catch(() => null),
-      getStudentRoutes(id).catch(() => []),
+      getBestStudentRoute(id, { student }).catch(() => null),
+      getStudentRoutes(id, { student }).catch(() => []),
       listBitacorasByStudent(id, {
         max: LIMITS?.maxBitacorasPage || 30,
+        student,
       }).catch(() => []),
       listResources({ student }).catch(() => []),
       listEvents().catch(() => []),

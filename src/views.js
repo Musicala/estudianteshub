@@ -809,6 +809,65 @@ async function renderHome(deps) {
   Profile
 ============================================================================= */
 
+function renderEmailAccessCard(emails = [], studentId = "") {
+  const list = safeArray(emails);
+
+  const itemsHTML = list.length
+    ? list
+        .map((entry) => {
+          const email = uiSafeText(entry?.email);
+          if (!email) return "";
+          const role = uiSafeText(entry?.role || "acudiente");
+          const inactive = entry?.active === false;
+
+          return `
+            <li class="cluster" style="justify-content:space-between;gap:.5rem;align-items:center;">
+              <span>
+                <strong>${escapeHtml(email)}</strong>
+                <span class="note"> · ${escapeHtml(role)}${inactive ? " · inactivo" : ""}</span>
+              </span>
+              <button
+                class="btn btn--ghost btn--sm"
+                type="button"
+                data-action="remove-student-email"
+                data-email="${escapeAttr(email)}"
+              >Quitar</button>
+            </li>
+          `;
+        })
+        .join("")
+    : `<li class="note">Aún no hay correos adicionales para este proceso.</li>`;
+
+  return card({
+    title: "Correos con acceso a este proceso",
+    subtitle:
+      "Agrega correos de acudientes o de un segundo padre/madre para que vean el mismo estudiante.",
+    bodyHTML: `
+      <ul class="stack" style="list-style:none;padding:0;margin:0 0 .75rem;">
+        ${itemsHTML}
+      </ul>
+
+      <div class="cluster" style="gap:.5rem;">
+        <input
+          id="newStudentEmailInput"
+          class="input"
+          type="email"
+          inputmode="email"
+          autocomplete="off"
+          placeholder="correo@ejemplo.com"
+          data-student-ref="${escapeAttr(studentId)}"
+          style="flex:1 1 220px;"
+        />
+        ${button("Agregar correo", { variant: "primary", action: "add-student-email", icon: "✚" })}
+      </div>
+
+      <p class="note" style="margin-top:.5rem;">
+        Los correos iniciales vienen de Bitácoras. Aquí solo se agregan correos extra.
+      </p>
+    `,
+  });
+}
+
 async function renderProfile(deps) {
   const ctx = getCtx(deps);
   const student = getStudent(ctx);
@@ -820,6 +879,21 @@ async function renderProfile(deps) {
     ["Rol", ctx.accessProfile?.role || ctx.userCtx?.role || ""],
     ["Estado de acceso", ctx.accessProfile?.active === false ? "Inactivo" : "Activo"],
   ].filter(([, value]) => uiSafeText(value));
+
+  // Gestión de correos del proceso: solo para administradores (coincide con las
+  // reglas de Firestore, que solo permiten a un admin escribir en users/).
+  let emailAccessCardHTML = "";
+  if (ctx.isAdmin) {
+    const api = getApi(deps);
+    const studentId = getStudentId(ctx);
+    let emails = [];
+
+    if (studentId && typeof api.listStudentEmailAccess === "function") {
+      emails = await api.listStudentEmailAccess(studentId).catch(() => []);
+    }
+
+    emailAccessCardHTML = renderEmailAccessCard(emails, studentId);
+  }
 
   const html = `
     ${viewHeader("Mi perfil", studentSubtitle(ctx), {
@@ -842,6 +916,8 @@ async function renderProfile(deps) {
           bodyHTML: kvList(accessRows),
         })}
       </div>
+
+      ${emailAccessCardHTML}
 
       ${card({
         title: "Acciones",

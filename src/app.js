@@ -133,6 +133,21 @@ function isBootstrapAdminEmail(email = "") {
   return BOOTSTRAP_ADMIN_EMAILS.has(normalizeEmail(email));
 }
 
+/*
+  Admin "estricto": coincide con isAdmin() de firestore.rules (correo bootstrap o
+  rol "admin" activo). Se usa para habilitar acciones que escriben en users/,
+  que las reglas solo permiten a admins.
+*/
+function isAdminUser() {
+  if (isBootstrapAdminEmail(state.user?.email)) return true;
+
+  const role = safeText(
+    state.accessProfile?.role || state.accessProfile?.rol || ""
+  ).toLowerCase();
+
+  return role === "admin" && state.accessProfile?.active !== false;
+}
+
 /* =============================================================================
   DOM
 ============================================================================= */
@@ -1245,6 +1260,72 @@ function wireMoreSheet() {
   Dependencias para vistas
 ============================================================================= */
 
+/* =============================================================================
+  Gestión de correos del proceso (subcorreos / acudientes)
+============================================================================= */
+
+function getActiveStudentId() {
+  return safeText(state.viewAsStudentId || state.studentId || state.student?.id || "");
+}
+
+async function handleAddStudentEmail() {
+  if (!isAdminUser()) {
+    toast("Solo un administrador de Musicala puede asignar correos.", "info");
+    return;
+  }
+
+  const input = document.getElementById("newStudentEmailInput");
+  const email = safeText(input?.value);
+  const studentId = safeText(input?.dataset?.studentRef) || getActiveStudentId();
+
+  if (!email) {
+    toast("Escribe un correo para agregar.", "warning");
+    return;
+  }
+
+  if (!studentId) {
+    toast("No hay un estudiante seleccionado.", "warning");
+    return;
+  }
+
+  try {
+    await api.addStudentEmailAccess(studentId, email, {
+      actorEmail: state.user?.email || "",
+    });
+    toast("Correo agregado al proceso.", "success");
+    await navigate({ force: true });
+  } catch (error) {
+    console.error("[App] No se pudo agregar correo:", error);
+    toast(`No se pudo agregar el correo. ${safeText(error?.message)}`, "danger");
+  }
+}
+
+async function handleRemoveStudentEmail(email) {
+  if (!isAdminUser()) {
+    toast("Solo un administrador de Musicala puede gestionar correos.", "info");
+    return;
+  }
+
+  const cleanEmail = safeText(email);
+  const studentId = getActiveStudentId();
+
+  if (!cleanEmail || !studentId) return;
+
+  const confirmed = window.confirm(
+    `¿Quitar el acceso de ${cleanEmail} a este estudiante?`
+  );
+  if (!confirmed) return;
+
+  try {
+    await api.removeStudentEmailAccess(cleanEmail, studentId);
+    toast("Correo retirado del proceso.", "success");
+    await navigate({ force: true });
+  } catch (error) {
+    console.error("[App] No se pudo quitar correo:", error);
+    toast(`No se pudo quitar el correo. ${safeText(error?.message)}`, "danger");
+  }
+}
+
 function getContext() {
   return {
     app: APP,
@@ -1265,6 +1346,7 @@ function getContext() {
     isLoggedIn: Boolean(state.user),
     hasStudent: Boolean(state.studentId && state.student),
     isInternal: isInternalUser(),
+    isAdmin: isAdminUser(),
     viewAsStudentId: state.viewAsStudentId,
     isViewingAsStudent: Boolean(state.viewAsStudentId),
     lastError: state.lastError,
@@ -1672,6 +1754,17 @@ function bindCoreHandlers() {
 
     if (action === "exit-view-as") {
       await exitStudentView();
+      return;
+    }
+
+    if (action === "add-student-email") {
+      await handleAddStudentEmail();
+      return;
+    }
+
+    if (action === "remove-student-email") {
+      await handleRemoveStudentEmail(actionEl.getAttribute("data-email"));
+      return;
     }
   });
 
