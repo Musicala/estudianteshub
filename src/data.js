@@ -1833,11 +1833,21 @@ const MUSIC_THEORY_TERMS = [
   "teoria",
   "teoria musical",
   "gramatica musical",
+  "gramatica",
   "lenguaje musical",
+  "lenguaje",
   "lectura musical",
+  "lectura ritmica",
+  "lectura de partitura",
+  "partitura",
+  "partituras",
   "solfeo",
   "armonia",
+  "apreciacion musical",
+  "apreciacion",
+  "historia de la musica",
   "entrenamiento auditivo",
+  "audioperceptiva",
   "dictado",
   "dictados",
   "ritmo",
@@ -1845,6 +1855,8 @@ const MUSIC_THEORY_TERMS = [
   "intervalos",
   "escalas",
   "acordes",
+  "circulo de quintas",
+  "figuras musicales",
 ];
 
 /*
@@ -1970,7 +1982,17 @@ const RESOURCE_INSTRUMENT_ALIASES = {
     "rudimentos",
   ],
   guitarra: ["guitarra", "guitar", "guitarra acustica", "guitarra electrica"],
-  piano: ["piano", "teclado", "keyboard"],
+  piano: [
+    "piano",
+    "pianos",
+    "pianista",
+    "piano funcional",
+    "piano complementario",
+    "teclado",
+    "teclados",
+    "keyboard",
+    "organeta",
+  ],
   canto: ["canto", "voz", "vocal", "tecnica vocal"],
   violin: ["violin"],
   cello: ["cello", "violoncello", "chelo"],
@@ -2057,8 +2079,34 @@ function collectResourceTerms(resource = {}) {
     resource.titulo,
     resource.description,
     resource.descripcion,
+    resource.observaciones,
+    resource.observacion,
+    resource.observations,
+    resource.notas,
+    resource.nota,
+    resource.notes,
+    resource.subtema,
+    resource.subarea,
     ...safeArray(resource.tags || resource.etiquetas),
   ]);
+}
+
+/*
+  ¿El texto del recurso (cualquier campo: área, categoría, tema, etiquetas,
+  título, descripción, observaciones…) menciona el instrumento del estudiante?
+  Detecta el instrumento aunque venga dentro de una frase ("Material de Piano",
+  "...para Piano"), no solo cuando el término es exactamente "piano". Esto da
+  PRIORIDAD a la coincidencia por instrumento sobre cualquier bloqueo.
+*/
+function resourceMentionsStudentInstrument(resourceTerms = [], studentTerms = []) {
+  const studentInstruments = studentTerms.filter((term) =>
+    RESOURCE_INSTRUMENT_TERMS.has(term)
+  );
+  if (!studentInstruments.length) return false;
+
+  return studentInstruments.some((instrument) =>
+    resourceTerms.some((resourceTerm) => resourceTerm.includes(instrument))
+  );
 }
 
 function hasTermMatch(resourceTerms = [], studentTerms = []) {
@@ -2075,12 +2123,27 @@ function hasTermMatch(resourceTerms = [], studentTerms = []) {
 }
 
 function isMusicStudent(studentTerms = []) {
-  return studentTerms.some((term) =>
-    term === "musica" ||
-    term.includes("musica") ||
-    term === "musical" ||
-    term.includes("musical")
-  );
+  /*
+    Un estudiante es "de música" si su texto menciona música/musical, o si su
+    proceso es un instrumento reconocido (piano, guitarra, canto…), un término
+    musical amplio o de teoría. Antes solo se aceptaba la palabra "musica", así
+    que un estudiante registrado SOLO como "Piano" no recibía el material de
+    teoría/lenguaje musical ni el material general. Ahora el instrumento basta.
+  */
+  return studentTerms.some((term) => {
+    if (
+      term === "musica" ||
+      term.includes("musica") ||
+      term === "musical" ||
+      term.includes("musical")
+    ) {
+      return true;
+    }
+    if (RESOURCE_INSTRUMENT_TERMS.has(term) || BROAD_MUSIC_TERMS.has(term)) {
+      return true;
+    }
+    return detectArtFromTerm(term) === "musica";
+  });
 }
 
 function isMusicTheoryResource(resourceTerms = []) {
@@ -2124,6 +2187,29 @@ function targetsStudentInstrument(resourceTerms = [], studentTerms = []) {
   );
 }
 
+const UNPUBLISHED_RESOURCE_STATES = new Set([
+  "borrador",
+  "inactivo",
+  "archivado",
+  "oculto",
+  "draft",
+  "inactive",
+  "archived",
+  "hidden",
+]);
+
+/*
+  ¿El recurso está publicado? Tolerante a mayúsculas/tildes: "Publicado",
+  "publicado" o estado vacío se consideran visibles. Solo se ocultan los estados
+  explícitos de no-publicado (borrador, inactivo, archivado, oculto).
+*/
+function isPublishedResource(resource = {}) {
+  if (resource.active === false) return false;
+  const estado = normalizeResourceText(resource.estado);
+  if (!estado) return true;
+  return !UNPUBLISHED_RESOURCE_STATES.has(estado);
+}
+
 function getStudentAreas(student) {
   return unique(collectStudentResourceTerms(student));
 }
@@ -2165,6 +2251,17 @@ function resourceMatchesStudent(resource, student) {
 
   const resourceTerms = collectResourceTerms(resource);
 
+  /*
+    PRIORIDAD POR INSTRUMENTO: si cualquier campo del recurso (área, categoría,
+    tema, etiquetas, título, descripción, observaciones…) menciona el instrumento
+    del estudiante, se muestra. Ya pasamos la compuerta de arte, así que aquí solo
+    decidimos dentro de la misma arte. Esto garantiza que "todo lo que diga Piano"
+    le llegue a los estudiantes de Piano, aunque el Área diga otra cosa.
+  */
+  if (resourceMentionsStudentInstrument(resourceTerms, studentAreas)) {
+    return true;
+  }
+
   // Estudiante sin instrumento concreto (solo "música"): mostramos material
   // musical (de cualquier instrumento) y el material sin arte definido, pero
   // no el de otras artes.
@@ -2183,6 +2280,9 @@ function resourceMatchesStudent(resource, student) {
     // Recurso sin scope: por instrumento del estudiante o teoría musical.
     if (targetsStudentInstrument(resourceTerms, studentAreas)) return true;
 
+    // Si apunta claramente a OTRO instrumento, bloquear.
+    if (targetsAnotherInstrument(resourceTerms, studentAreas)) return false;
+
     // Si los textos del recurso lo ubican claramente en otro arte, bloquear.
     const looseArts = detectArts(resourceTerms);
     if (
@@ -2193,11 +2293,15 @@ function resourceMatchesStudent(resource, student) {
       return false;
     }
 
-    return (
-      isMusicStudent(studentAreas) &&
-      isMusicTheoryResource(resourceTerms) &&
-      !targetsAnotherInstrument(resourceTerms, studentAreas)
-    );
+    /*
+      Material general (sin área ni instrumento que apunte a otro lado): visible
+      para todo estudiante de música. Antes solo pasaba si era teoría, así que el
+      material etiquetado "Música"/"Material general" no le cargaba a los de un
+      instrumento concreto.
+    */
+    if (isMusicStudent(studentAreas)) return true;
+
+    return isMusicTheoryResource(resourceTerms);
   }
 
   // Coincidencia directa de área/instrumento.
@@ -2246,22 +2350,17 @@ export async function listResources(options = {}) {
     */
     const resourcesRef = collection(libraryDb, LIBRARY_COLLECTIONS.resources);
 
-    const clauses = [];
-
-    if (activeOnly) {
-      clauses.push(where("estado", "==", "publicado"));
-    }
-
     /*
-      Se leen todos los publicados (la biblioteca tiene ~200 recursos) y el
-      filtro por área se hace en cliente, porque las áreas del estudiante
-      pueden venir con mayúsculas o sin tildes.
+      Se leen TODOS los recursos (la biblioteca tiene ~200) y el filtro de
+      "publicado" se hace en cliente, sin where("estado","=="...), porque el
+      estado puede venir con mayúsculas o tildes ("Publicado") y un where exacto
+      en minúscula los descartaba silenciosamente. El filtro por área/instrumento
+      también es en cliente por la misma razón.
     */
     const fetchCap = 1000;
 
     const primary = query(
       resourcesRef,
-      ...clauses,
       limit(fetchCap)
     );
 
@@ -2275,7 +2374,7 @@ export async function listResources(options = {}) {
     let resources = docsToObjects(snap)
       .map((item) => normalizeResource(item))
       .filter(Boolean)
-      .filter((item) => !activeOnly || item.active !== false);
+      .filter((item) => !activeOnly || isPublishedResource(item));
 
     let studentData = student;
 
