@@ -2392,6 +2392,73 @@ export async function listResources(options = {}) {
   }
 }
 
+/*
+  Diagnóstico: explica, para un estudiante, qué ve y qué se le oculta de la
+  biblioteca y por qué. Útil desde consola para entender un "no me aparece".
+  Uso: await api.diagnoseResources({ student }) o { studentId }.
+*/
+export async function diagnoseResources(options = {}) {
+  const { student = null, studentId = null } = options;
+
+  let studentData = student;
+  if (!studentData && studentId) {
+    studentData = await getStudent(studentId);
+  }
+
+  const studentAreas = getStudentAreas(studentData);
+
+  const resourcesRef = collection(libraryDb, LIBRARY_COLLECTIONS.resources);
+  const snap = await getDocsSafe(
+    query(resourcesRef, limit(1000)),
+    query(resourcesRef, limit(1000)),
+    "diagnoseResources"
+  );
+
+  const all = docsToObjects(snap).map((item) => normalizeResource(item)).filter(Boolean);
+
+  const visibles = [];
+  const ocultos = [];
+
+  for (const r of all) {
+    const publicado = isPublishedResource(r);
+    const matchInstrumento = resourceMentionsStudentInstrument(collectResourceTerms(r), studentAreas);
+    const matchEstudiante = resourceMatchesStudent(r, studentData);
+    const visible = publicado && matchEstudiante;
+
+    const fila = {
+      titulo: r.title || r.titulo,
+      area: r.area || "(sin área)",
+      tema: r.tema || "",
+      estado: r.estado || "(sin estado)",
+      publicado,
+      mencionaInstrumento: matchInstrumento,
+      pasaFiltroArea: matchEstudiante,
+    };
+
+    (visible ? visibles : ocultos).push(fila);
+  }
+
+  const resumen = {
+    estudiante: safeText(
+      studentData?.name ||
+        studentData?.nombre ||
+        studentData?.fullName ||
+        studentData?.displayName,
+      "(sin estudiante)"
+    ),
+    areasDetectadas: studentAreas,
+    totalBiblioteca: all.length,
+    visibles: visibles.length,
+    ocultos: ocultos.length,
+  };
+
+  console.log("[DIAG recursos] Resumen:", resumen);
+  console.log("[DIAG recursos] Ocultos (revisa 'publicado' y 'pasaFiltroArea'):");
+  console.table(ocultos);
+
+  return { resumen, visibles, ocultos };
+}
+
 export async function getResource(resourceId) {
   try {
     const id = safeText(resourceId);

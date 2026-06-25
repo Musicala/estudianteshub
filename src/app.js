@@ -1933,6 +1933,8 @@ function exposeDiagnostics() {
       Uso: await MUSICALA_DIAG.revisarAcceso("correo@ejemplo.com")
       Revisa el documento users/{correo} y verifica si el vínculo con su(s)
       estudiante(s) está bien hecho. Ideal para casos como el de un acudiente.
+      Para ver por qué a un estudiante no le aparece un recurso de la biblioteca:
+      await MUSICALA_DIAG.revisarRecursos("correo@..." o "idEstudiante")
     */
     async revisarAcceso(email) {
       if (!isInternalUser()) {
@@ -2009,6 +2011,44 @@ function exposeDiagnostics() {
       }
 
       return reporte;
+    },
+
+    /*
+      Diagnóstico de biblioteca: muestra qué recursos ve un estudiante y cuáles
+      se le ocultan y por qué (publicado / filtro por instrumento).
+      Uso: await MUSICALA_DIAG.revisarRecursos("correo@..." o studentId)
+    */
+    async revisarRecursos(identifier) {
+      if (!isInternalUser()) {
+        console.warn("[DIAG] Solo disponible para admins/equipo Musicala.");
+        return null;
+      }
+
+      const raw = safeText(identifier);
+      if (!raw) {
+        console.warn('[DIAG] Pasa un correo o studentId: revisarRecursos("correo@..." o "idEstudiante")');
+        return null;
+      }
+
+      let student = null;
+      if (raw.includes("@")) {
+        const profile = await api.getAccessProfileByEmail(normalizeEmail(raw));
+        const ids = profile ? extractStudentIdsFromAccessProfile(profile) : [];
+        if (!ids.length) {
+          console.warn(`[DIAG] ${raw} no tiene estudiantes vinculados.`);
+          return null;
+        }
+        student = await api.getStudent(ids[0]).catch(() => null);
+      } else {
+        student = await api.getStudent(raw).catch(() => null);
+      }
+
+      if (!student) {
+        console.warn("[DIAG] No se encontró el estudiante.");
+        return null;
+      }
+
+      return api.diagnoseResources({ student });
     },
   };
 }
