@@ -2438,6 +2438,18 @@ export async function diagnoseResources(options = {}) {
     (visible ? visibles : ocultos).push(fila);
   }
 
+  const procesos = (() => {
+    try {
+      return normalizeStudentProcesses(studentData || {}).map((p) => ({
+        arte: p.arte,
+        detalle: p.detalle,
+        label: p.label,
+      }));
+    } catch {
+      return [];
+    }
+  })();
+
   const resumen = {
     estudiante: safeText(
       studentData?.name ||
@@ -2447,12 +2459,20 @@ export async function diagnoseResources(options = {}) {
       "(sin estudiante)"
     ),
     areasDetectadas: studentAreas,
+    camposEstudiante: {
+      area: studentData?.area ?? null,
+      instrumento: studentData?.instrumento ?? studentData?.instrument ?? null,
+      programa: studentData?.programa ?? studentData?.program ?? null,
+      proceso: studentData?.proceso ?? studentData?.process ?? null,
+      procesos,
+    },
     totalBiblioteca: all.length,
     visibles: visibles.length,
     ocultos: ocultos.length,
   };
 
   console.log("[DIAG recursos] Resumen:", resumen);
+  console.log("[DIAG recursos] Campos del estudiante:", resumen.camposEstudiante);
   console.log("[DIAG recursos] Ocultos (revisa 'publicado' y 'pasaFiltroArea'):");
   console.table(ocultos);
 
