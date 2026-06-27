@@ -45,6 +45,26 @@
 </head>
 
 <body>
+  <!--
+    Redirección al hogar oficial (Firebase Hosting).
+    La app vive en https://musicala-estudianteshub.web.app, donde el login es del
+    mismo dominio (arregla iPhone). Si alguien abre la versión vieja de GitHub
+    Pages, lo mandamos a la URL correcta conservando su ruta (#/...).
+  -->
+  <script>
+    (() => {
+      var OFICIAL = "musicala-estudianteshub.web.app";
+      var host = location.hostname || "";
+      // Solo redirige desde dominios distintos al oficial (p. ej. github.io).
+      // Nunca en local ni en el propio sitio de Firebase.
+      var esLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+      var esOficial = host === OFICIAL || host.endsWith(".web.app") || host.endsWith(".firebaseapp.com");
+      if (!esLocal && !esOficial) {
+        location.replace("https://" + OFICIAL + "/" + (location.hash || ""));
+      }
+    })();
+  </script>
+
   <a class="skip-link" href="#appMain">
     Saltar al contenido principal
   </a>
