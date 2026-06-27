@@ -1792,10 +1792,10 @@ async function renderResources(deps) {
     items = await api.listResources({
       student,
       studentId: getStudentId(ctx),
-      max: 120,
+      max: 1500,
     }).catch(() => []);
   } else if (typeof api.listLibraryPins === "function") {
-    items = await api.listLibraryPins(getStudentId(ctx), 120).catch(() => []);
+    items = await api.listLibraryPins(getStudentId(ctx), 1500).catch(() => []);
   }
 
   const resources = normalizeResources(items);

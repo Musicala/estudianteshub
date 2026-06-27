@@ -2545,7 +2545,11 @@ export async function listResources(options = {}) {
       activeOnly = true,
     } = options;
 
-    const finalMax = clampLimit(max, DEFAULT_MAX, 120);
+    // La vista por carpetas se arma en el cliente, así que dejamos un techo alto:
+    // un estudiante de un instrumento puede ver cientos de recursos (su material +
+    // el general de su arte). Con 120 se quedaban fuera muchos (p. ej. las listas
+    // de repertorio), aunque el panel admin sí los veía.
+    const finalMax = clampLimit(max, DEFAULT_MAX, 1500);
 
     /*
       Los recursos viven en el proyecto biblioteca-guitarra-fa182,
