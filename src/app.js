@@ -1326,6 +1326,223 @@ async function handleRemoveStudentEmail(email) {
   }
 }
 
+/* =============================================================================
+  Panel admin de recursos por estudiante
+  Muestra qué ve / qué se le oculta de la biblioteca y permite asignar recursos
+  a mano o activar "ver toda la biblioteca" para el estudiante seleccionado.
+============================================================================= */
+
+let resourceAdmin = null;
+
+function resourceIsVisible(row) {
+  if (!resourceAdmin) return false;
+  if (resourceAdmin.assigned.has(row.id)) return true;
+  return Boolean(row.publicado) && (resourceAdmin.verTodo || Boolean(row.pasaFiltroArea));
+}
+
+async function invalidateActiveStudent() {
+  // Borra del cache al estudiante activo y lo vuelve a cargar para que la vista
+  // de recursos refleje los cambios de asignación/override al cerrar el panel.
+  const id = getActiveStudentId();
+  if (!id) return;
+
+  for (const [key, value] of state.studentsById) {
+    if (value?.id === id || key === id) {
+      state.studentsById.delete(key);
+    }
+  }
+
+  try {
+    await setActiveStudent(id, { silent: true });
+  } catch (error) {
+    console.warn("[App] No se pudo refrescar el estudiante:", error);
+  }
+}
+
+async function openResourceAdmin() {
+  if (!isAdminUser()) {
+    toast("Solo un administrador de Musicala puede gestionar recursos.", "info");
+    return;
+  }
+
+  const studentId = getActiveStudentId();
+  if (!studentId || !state.student) {
+    toast("Selecciona o entra como un estudiante primero.", "info");
+    return;
+  }
+
+  openModal({
+    title: "Recursos del estudiante",
+    subtitle: getStudentName(state.student, "Estudiante"),
+    bodyHTML: `<p class="note">Cargando diagnóstico de la biblioteca…</p>`,
+    footHTML: `<button class="btn btn--primary" type="button" data-action="resource-admin-done">Listo</button>`,
+  });
+
+  try {
+    const diag = await api.diagnoseResources({ student: state.student });
+    const rows = Array.isArray(diag?.todos) ? diag.todos : [];
+
+    resourceAdmin = {
+      studentId,
+      verTodo: Boolean(diag?.resumen?.verTodoSinFiltro),
+      assigned: new Set(rows.filter((row) => row.asignado).map((row) => row.id)),
+      rows,
+      filter: "",
+      dirty: false,
+    };
+
+    renderResourceAdminBody();
+  } catch (error) {
+    console.error("[App] No se pudo cargar el diagnóstico de recursos:", error);
+    const body = document.getElementById("modalBody");
+    if (body) {
+      body.innerHTML = `<p class="note">No se pudo cargar la biblioteca. ${escapeHtml(safeText(error?.message))}</p>`;
+    }
+  }
+}
+
+function renderResourceAdminBody() {
+  const body = document.getElementById("modalBody");
+  if (!body || !resourceAdmin) return;
+
+  const rows = resourceAdmin.rows;
+  const visibleCount = rows.filter((row) => resourceIsVisible(row)).length;
+  const hiddenCount = rows.length - visibleCount;
+
+  const listHTML = rows
+    .map((row) => {
+      const visible = resourceIsVisible(row);
+      const assigned = resourceAdmin.assigned.has(row.id);
+
+      const motivo = !row.publicado
+        ? "no publicado"
+        : visible
+          ? assigned && !row.pasaFiltroArea && !resourceAdmin.verTodo
+            ? "asignado a mano"
+            : "coincide con su proceso"
+          : "fuera de su arte/instrumento";
+
+      return `
+        <div class="pick-item" data-resource-row="${escapeHtml(row.id)}" style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+          <div style="min-width:0">
+            <div class="pick-item__title">${escapeHtml(safeText(row.titulo, "Recurso"))}</div>
+            <div class="pick-item__meta">
+              ${escapeHtml(safeText(row.area, "sin área"))}
+              · <span class="${visible ? "login-badge login-badge--ok" : "login-badge login-badge--no"}">${visible ? "✓ visible" : "⛔ oculto"}</span>
+              <span class="muted">· ${escapeHtml(motivo)}</span>
+            </div>
+          </div>
+          <button
+            class="btn ${assigned ? "btn--ghost" : "btn--primary"} btn--sm"
+            type="button"
+            data-assign-id="${escapeHtml(row.id)}"
+            data-assign-next="${assigned ? "0" : "1"}"
+          >
+            ${assigned ? "Quitar" : "Asignar"}
+          </button>
+        </div>
+      `;
+    })
+    .join("");
+
+  body.innerHTML = `
+    <div class="stack">
+      <p class="note">
+        <strong>${visibleCount}</strong> visibles ·
+        <strong>${hiddenCount}</strong> ocultos ·
+        de <strong>${rows.length}</strong> en la biblioteca
+      </p>
+
+      <label class="pick-item" style="display:flex;gap:10px;align-items:center;cursor:pointer">
+        <input id="resourceAdminShowAll" type="checkbox" ${resourceAdmin.verTodo ? "checked" : ""} />
+        <span>
+          <strong>Ver toda la biblioteca</strong>
+          <span class="pick-item__meta">Muestra todos los recursos publicados, sin filtrar por arte/instrumento.</span>
+        </span>
+      </label>
+
+      <input
+        id="resourceAdminSearch"
+        class="input"
+        type="search"
+        placeholder="Buscar recurso por nombre o área…"
+        autocomplete="off"
+        aria-label="Buscar recurso"
+        value="${escapeHtml(resourceAdmin.filter)}"
+      />
+
+      <div class="pick-list" id="resourceAdminList">
+        ${listHTML}
+      </div>
+    </div>
+  `;
+
+  wireResourceAdminBody();
+  applyResourceAdminFilter();
+}
+
+function applyResourceAdminFilter() {
+  const list = document.getElementById("resourceAdminList");
+  if (!list || !resourceAdmin) return;
+
+  const term = safeText(resourceAdmin.filter).toLowerCase();
+
+  list.querySelectorAll("[data-resource-row]").forEach((rowEl) => {
+    const match = !term || rowEl.textContent.toLowerCase().includes(term);
+    rowEl.hidden = !match;
+  });
+}
+
+function wireResourceAdminBody() {
+  const body = document.getElementById("modalBody");
+  if (!body || !resourceAdmin) return;
+
+  const search = body.querySelector("#resourceAdminSearch");
+  search?.addEventListener("input", () => {
+    resourceAdmin.filter = search.value;
+    applyResourceAdminFilter();
+  });
+
+  const showAll = body.querySelector("#resourceAdminShowAll");
+  showAll?.addEventListener("change", async () => {
+    const next = Boolean(showAll.checked);
+    showAll.disabled = true;
+    try {
+      await api.setStudentShowAllResources(resourceAdmin.studentId, next);
+      resourceAdmin.verTodo = next;
+      resourceAdmin.dirty = true;
+      renderResourceAdminBody();
+      toast(next ? "Ahora ve toda la biblioteca." : "Filtro por proceso reactivado.", "success");
+    } catch (error) {
+      console.error("[App] No se pudo cambiar 'ver todo':", error);
+      toast("No se pudo guardar el cambio.", "danger");
+      showAll.disabled = false;
+    }
+  });
+
+  body.querySelector("#resourceAdminList")?.addEventListener("click", async (event) => {
+    const btn = event.target?.closest?.("[data-assign-id]");
+    if (!btn) return;
+
+    const id = btn.getAttribute("data-assign-id");
+    const assign = btn.getAttribute("data-assign-next") === "1";
+    if (!id) return;
+
+    btn.disabled = true;
+    try {
+      await api.assignResourceToStudent(resourceAdmin.studentId, id, assign);
+      if (assign) resourceAdmin.assigned.add(id);
+      else resourceAdmin.assigned.delete(id);
+      resourceAdmin.dirty = true;
+      renderResourceAdminBody();
+    } catch (error) {
+      console.error("[App] No se pudo asignar/quitar el recurso:", error);
+      toast("No se pudo guardar el cambio.", "danger");
+      btn.disabled = false;
+    }
+  });
+}
+
 function getContext() {
   return {
     app: APP,
@@ -1754,6 +1971,22 @@ function bindCoreHandlers() {
 
     if (action === "exit-view-as") {
       await exitStudentView();
+      return;
+    }
+
+    if (action === "open-resource-admin") {
+      await openResourceAdmin();
+      return;
+    }
+
+    if (action === "resource-admin-done") {
+      const wasDirty = Boolean(resourceAdmin?.dirty);
+      closeModal();
+      if (wasDirty) {
+        await invalidateActiveStudent();
+        await navigate({ force: true });
+      }
+      resourceAdmin = null;
       return;
     }
 

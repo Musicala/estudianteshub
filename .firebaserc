@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "bitacoras-de-clase"
+  },
+  "targets": {
+    "bitacoras-de-clase": {
+      "hosting": {
+        "estudianteshub": [
+          "musicala-estudianteshub"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

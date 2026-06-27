@@ -77,6 +77,25 @@ function normalizePersistenceMode(mode = "local") {
   return browserLocalPersistence;
 }
 
+/*
+  iPhone/iPad: los popups de Google son poco fiables, sobre todo cuando la app
+  está instalada en la pantalla de inicio (modo standalone). En esos casos el
+  login por popup se queda a medias y el usuario vuelve a la pantalla de inicio
+  de sesión (el "bucle"). Por eso, en iOS preferimos el flujo por redirect.
+*/
+function isIOSDevice() {
+  const ua = navigator.userAgent || "";
+  const iOSUA = /iphone|ipad|ipod/i.test(ua);
+  // iPadOS moderno se reporta como Mac con pantalla táctil.
+  const iPadOS = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return (iOSUA || iPadOS) && !window.MSStream;
+}
+
+function shouldPreferRedirect() {
+  // En iOS siempre redirect; el popup es el que genera el bucle.
+  return isIOSDevice();
+}
+
 function isPopupProblem(error) {
   const code = String(error?.code || "");
 
@@ -231,7 +250,7 @@ export async function loginGoogle(options = {}) {
 
   const {
     useRedirectFallback = true,
-    preferRedirect = false,
+    preferRedirect = shouldPreferRedirect(),
   } = options || {};
 
   loginInFlight = (async () => {

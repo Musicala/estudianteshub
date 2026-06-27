@@ -1754,6 +1754,33 @@ function openBitacoraModal(item = {}) {
   Resources
 ============================================================================= */
 
+/*
+  Botón de diagnóstico de recursos: solo para admins. Abre un panel que muestra
+  qué recursos ve el estudiante seleccionado, cuáles se le ocultan y por qué, y
+  permite asignar recursos a mano o activar "ver toda la biblioteca".
+*/
+function resourceAdminButton(ctx) {
+  if (!ctx?.isAdmin) return "";
+
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card__head">
+        <div>
+          <h2 class="card__title">🛠️ Recursos del estudiante (admin)</h2>
+          <p class="card__subtitle">
+            Revisa qué ve y qué se le oculta, asigna recursos a mano o muéstrale toda la biblioteca.
+          </p>
+        </div>
+      </div>
+      <div class="card__footer">
+        <button class="btn btn--primary btn--sm" type="button" data-action="open-resource-admin">
+          Abrir panel de recursos
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 async function renderResources(deps) {
   const ctx = getCtx(deps);
   const api = getApi(deps);
@@ -1778,6 +1805,8 @@ async function renderResources(deps) {
       ${viewHeader("Recursos", studentSubtitle(ctx), {
         eyebrow: "Material de apoyo",
       })}
+
+      ${resourceAdminButton(ctx)}
 
       ${emptyState(
         "Aún no hay recursos",
@@ -1840,6 +1869,8 @@ async function renderResources(deps) {
     ${viewHeader("Recursos", studentSubtitle(ctx), {
       eyebrow: "Material de apoyo",
     })}
+
+    ${resourceAdminButton(ctx)}
 
     ${stack(`
       ${card({

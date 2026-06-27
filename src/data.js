@@ -2214,7 +2214,55 @@ function getStudentAreas(student) {
   return unique(collectStudentResourceTerms(student));
 }
 
+/*
+  Especialidades "comunes" a toda una disciplina: un estudiante las ve aunque su
+  instrumento no coincida (teoría/lenguaje musical, lectura, ritmo, material
+  general). Debe coincidir con `generales` en config/taxonomia del Manager.
+*/
+const CLEAN_GENERAL_ESPECIALIDADES = new Set([
+  "",
+  "general",
+  "teoria-musical",
+  "lenguaje-musical",
+  "lectura",
+  "ritmo",
+]);
+
+/*
+  Camino LIMPIO: cuando el recurso trae el campo nuevo `disciplina`, decidimos su
+  visibilidad por campos exactos en lugar de adivinar por texto. Regla:
+    disciplina coincide con el arte del estudiante
+    Y (especialidad es general/teoría  O  coincide con su instrumento).
+  Devuelve true/false si el recurso está clasificado; null si aún no lo está
+  (entonces se usa la heurística legacy de abajo).
+*/
+function cleanResourceMatch(resource, student) {
+  const disciplina = normalizeResourceText(resource.disciplina);
+  if (!disciplina) return null; // recurso sin clasificar -> heurística legacy
+
+  const studentAreas = getStudentAreas(student);
+  if (!studentAreas.length) return true; // sin datos del estudiante -> mostrar
+
+  const studentArts = detectArts(studentAreas);
+  const resourceArt = detectArtFromTerm(disciplina) || disciplina;
+  if (studentArts.size && !studentArts.has(resourceArt)) return false;
+
+  const especialidad = normalizeResourceText(resource.especialidad);
+  if (CLEAN_GENERAL_ESPECIALIDADES.has(especialidad)) return true;
+
+  // Especialidad concreta: debe coincidir con el instrumento del estudiante.
+  return studentAreas.some(
+    (term) =>
+      term === especialidad ||
+      term.includes(especialidad) ||
+      especialidad.includes(term)
+  );
+}
+
 function resourceMatchesStudent(resource, student) {
+  const limpio = cleanResourceMatch(resource, student);
+  if (limpio !== null) return limpio;
+
   const resourceScopeTerms = expandResourceTerms([
     resource.area,
     resource.instrument,
@@ -2332,6 +2380,112 @@ function resourceMatchesStudent(resource, student) {
   );
 }
 
+/* =============================================================================
+  Overrides de recursos por estudiante (gestionados por admin desde el HUB)
+  Se guardan en el documento del estudiante (students/{id}):
+    - showAllResources: boolean
+    - extraResourceIds: string[]   (ids de la biblioteca asignados a mano)
+  Las reglas de Firestore permiten que un admin escriba `students/{id}` y que el
+  propio estudiante lea su documento, así que no hace falta tocar otras reglas.
+============================================================================= */
+
+function getStudentShowAllResources(student = null) {
+  return (
+    student?.showAllResources === true ||
+    student?.verTodosLosRecursos === true
+  );
+}
+
+function getStudentExtraResourceIds(student = null) {
+  const raw = [
+    ...safeArray(student?.extraResourceIds),
+    ...safeArray(student?.recursosAsignados),
+  ]
+    .map((id) => safeText(id))
+    .filter(Boolean);
+
+  return new Set(unique(raw));
+}
+
+/*
+  Asigna (o quita) un recurso de la biblioteca a un estudiante concreto, para
+  forzar su visibilidad aunque el filtro automático lo oculte.
+  Uso (solo admin): assignResourceToStudent(studentId, resourceId, true|false)
+*/
+export async function assignResourceToStudent(studentId, resourceId, assign = true) {
+  try {
+    const id = safeText(studentId);
+    assertNonEmptyString(id, "studentId");
+
+    const rid = safeText(resourceId);
+    assertNonEmptyString(rid, "resourceId");
+
+    const ref = doc(db, COLLECTIONS.students, id);
+    const snap = await getDoc(ref);
+    const existing = snap.exists() ? snap.data() || {} : {};
+
+    const current = unique(
+      [
+        ...safeArray(existing.extraResourceIds),
+        ...safeArray(existing.recursosAsignados),
+      ]
+        .map((value) => safeText(value))
+        .filter(Boolean)
+    );
+
+    const next = assign
+      ? unique([...current, rid])
+      : current.filter((value) => value !== rid);
+
+    await setDoc(
+      ref,
+      removeUndefinedFields({
+        extraResourceIds: next,
+        recursosAsignados: next,
+        updatedAt: serverTimestamp(),
+      }),
+      { merge: true }
+    );
+
+    return next;
+  } catch (error) {
+    throw withContextError(error, "assignResourceToStudent");
+  }
+}
+
+export async function unassignResourceFromStudent(studentId, resourceId) {
+  return assignResourceToStudent(studentId, resourceId, false);
+}
+
+/*
+  Activa/desactiva el modo "ver toda la biblioteca sin filtro" para un estudiante.
+  Uso (solo admin): setStudentShowAllResources(studentId, true|false)
+*/
+export async function setStudentShowAllResources(studentId, showAll = true) {
+  try {
+    const id = safeText(studentId);
+    assertNonEmptyString(id, "studentId");
+
+    const value = Boolean(showAll);
+
+    const ref = doc(db, COLLECTIONS.students, id);
+
+    await setDoc(
+      ref,
+      removeUndefinedFields({
+        showAllResources: value,
+        verTodosLosRecursos: value,
+        updatedAt: serverTimestamp(),
+      }),
+      { merge: true }
+    );
+
+    return value;
+  } catch (error) {
+    throw withContextError(error, "setStudentShowAllResources");
+  }
+}
+
 export async function listResources(options = {}) {
   try {
     const {
@@ -2371,18 +2525,40 @@ export async function listResources(options = {}) {
 
     const snap = await getDocsSafe(primary, fallback, "listResources");
 
-    let resources = docsToObjects(snap)
-      .map((item) => normalizeResource(item))
-      .filter(Boolean)
-      .filter((item) => !activeOnly || isPublishedResource(item));
-
     let studentData = student;
 
     if (!studentData && studentId) {
       studentData = await getStudent(studentId);
     }
 
-    resources = resources.filter((resource) => resourceMatchesStudent(resource, studentData));
+    /*
+      Overrides administrados desde el HUB (guardados en el documento del
+      estudiante por un admin):
+      - showAllResources / verTodosLosRecursos: ve TODA la biblioteca publicada,
+        ignorando el filtro automático por arte/instrumento.
+      - extraResourceIds / recursosAsignados: recursos forzados a aparecer aunque
+        el filtro (o incluso el estado de publicación) los ocultaría.
+    */
+    const showAllResources = getStudentShowAllResources(studentData);
+    const extraResourceIds = getStudentExtraResourceIds(studentData);
+
+    let resources = docsToObjects(snap)
+      .map((item) => normalizeResource(item))
+      .filter(Boolean)
+      .filter((resource) => {
+        const assigned = extraResourceIds.has(safeText(resource.id));
+
+        // Recurso asignado manualmente: siempre se muestra.
+        if (assigned) return true;
+
+        // El resto respeta el estado de publicación.
+        if (activeOnly && !isPublishedResource(resource)) return false;
+
+        // Override "ver todo": muestra cualquier recurso publicado.
+        if (showAllResources) return true;
+
+        return resourceMatchesStudent(resource, studentData);
+      });
 
     resources = sortByText(resources, "title", "asc");
 
@@ -2416,23 +2592,33 @@ export async function diagnoseResources(options = {}) {
 
   const all = docsToObjects(snap).map((item) => normalizeResource(item)).filter(Boolean);
 
+  const showAllResources = getStudentShowAllResources(studentData);
+  const extraResourceIds = getStudentExtraResourceIds(studentData);
+
   const visibles = [];
   const ocultos = [];
 
   for (const r of all) {
+    const id = safeText(r.id);
     const publicado = isPublishedResource(r);
     const matchInstrumento = resourceMentionsStudentInstrument(collectResourceTerms(r), studentAreas);
     const matchEstudiante = resourceMatchesStudent(r, studentData);
-    const visible = publicado && matchEstudiante;
+    const asignado = extraResourceIds.has(id);
+
+    // Misma lógica que listResources: asignado manual o (publicado y (verTodo o filtro)).
+    const visible = asignado || (publicado && (showAllResources || matchEstudiante));
 
     const fila = {
+      id,
       titulo: r.title || r.titulo,
       area: r.area || "(sin área)",
       tema: r.tema || "",
       estado: r.estado || "(sin estado)",
       publicado,
+      asignado,
       mencionaInstrumento: matchInstrumento,
       pasaFiltroArea: matchEstudiante,
+      visible,
     };
 
     (visible ? visibles : ocultos).push(fila);
@@ -2469,6 +2655,8 @@ export async function diagnoseResources(options = {}) {
     totalBiblioteca: all.length,
     visibles: visibles.length,
     ocultos: ocultos.length,
+    verTodoSinFiltro: showAllResources,
+    asignadosManualmente: extraResourceIds.size,
   };
 
   console.log("[DIAG recursos] Resumen:", resumen);
@@ -2476,7 +2664,12 @@ export async function diagnoseResources(options = {}) {
   console.log("[DIAG recursos] Ocultos (revisa 'publicado' y 'pasaFiltroArea'):");
   console.table(ocultos);
 
-  return { resumen, visibles, ocultos };
+  // Lista completa ordenada por título, para la UI de asignación del admin.
+  const todos = [...visibles, ...ocultos].sort((a, b) =>
+    safeText(a.titulo).localeCompare(safeText(b.titulo), "es")
+  );
+
+  return { resumen, visibles, ocultos, todos };
 }
 
 export async function getResource(resourceId) {

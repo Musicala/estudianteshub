@@ -56,7 +56,14 @@ export const APP_META = Object.freeze({
 
 export const FIREBASE_CONFIG = Object.freeze({
   apiKey: "AIzaSyDQcHQEzGE1DDpD1b_foUTmVo3D9LK_0N0",
-  authDomain: "bitacoras-de-clase.firebaseapp.com",
+  /*
+    Login del MISMO dominio que la app (Firebase Hosting: musicala-estudianteshub).
+    Esto es lo que arregla de raíz el bucle de login en iPhone: el handler de
+    autenticación se sirve en el mismo origen que el portal, así Safari no bloquea
+    el almacenamiento entre dominios. Si algún día cambia el sitio de Hosting,
+    actualiza también esta línea.
+  */
+  authDomain: "musicala-estudianteshub.web.app",
   projectId: "bitacoras-de-clase",
   storageBucket: "bitacoras-de-clase.firebasestorage.app",
   messagingSenderId: "1047385643159",
