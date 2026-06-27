@@ -2407,12 +2407,47 @@ function getStudentExtraResourceIds(student = null) {
   return new Set(unique(raw));
 }
 
+function getStudentExcludedResourceIds(student = null) {
+  const raw = [
+    ...safeArray(student?.excludedResourceIds),
+    ...safeArray(student?.recursosOcultos),
+  ]
+    .map((id) => safeText(id))
+    .filter(Boolean);
+
+  return new Set(unique(raw));
+}
+
 /*
-  Asigna (o quita) un recurso de la biblioteca a un estudiante concreto, para
-  forzar su visibilidad aunque el filtro automático lo oculte.
-  Uso (solo admin): assignResourceToStudent(studentId, resourceId, true|false)
+  Decisión final de visibilidad de un recurso para un estudiante. Combina el
+  "preset" automático (filtro por arte/instrumento) con los ajustes manuales del
+  admin. Orden de prioridad:
+    1. Oculto manual  -> nunca se ve.
+    2. Asignado manual -> siempre se ve.
+    3. Resto -> debe estar publicado y (ver-todo o pasar el filtro por proceso).
 */
-export async function assignResourceToStudent(studentId, resourceId, assign = true) {
+function isResourceVisibleForStudent(resource, ctx) {
+  const id = safeText(resource.id);
+
+  if (ctx.excluded.has(id)) return false;
+  if (ctx.assigned.has(id)) return true;
+
+  if (ctx.activeOnly && !isPublishedResource(resource)) return false;
+  if (ctx.showAll) return true;
+
+  return resourceMatchesStudent(resource, ctx.student);
+}
+
+/*
+  Ajusta manualmente (solo admin) la visibilidad de UN recurso para UN estudiante,
+  por encima del preset automático por arte/instrumento.
+    setStudentResourceVisibility(studentId, resourceId, true)  -> mostrar
+    setStudentResourceVisibility(studentId, resourceId, false) -> ocultar
+  Mantiene dos listas en el documento del estudiante:
+    extraResourceIds    (asignados / "poner")
+    excludedResourceIds (ocultos / "quitar")
+*/
+export async function setStudentResourceVisibility(studentId, resourceId, visible = true) {
   try {
     const id = safeText(studentId);
     assertNonEmptyString(id, "studentId");
@@ -2424,37 +2459,52 @@ export async function assignResourceToStudent(studentId, resourceId, assign = tr
     const snap = await getDoc(ref);
     const existing = snap.exists() ? snap.data() || {} : {};
 
-    const current = unique(
-      [
-        ...safeArray(existing.extraResourceIds),
-        ...safeArray(existing.recursosAsignados),
-      ]
-        .map((value) => safeText(value))
-        .filter(Boolean)
-    );
+    const cleanList = (...sources) =>
+      unique(
+        sources
+          .flatMap((source) => safeArray(source))
+          .map((value) => safeText(value))
+          .filter(Boolean)
+      );
 
-    const next = assign
-      ? unique([...current, rid])
-      : current.filter((value) => value !== rid);
+    let extra = cleanList(existing.extraResourceIds, existing.recursosAsignados);
+    let excluded = cleanList(existing.excludedResourceIds, existing.recursosOcultos);
+
+    if (visible) {
+      // Mostrar: lo añadimos a "asignados" y lo sacamos de "ocultos".
+      extra = unique([...extra, rid]);
+      excluded = excluded.filter((value) => value !== rid);
+    } else {
+      // Ocultar: lo sacamos de "asignados" y lo añadimos a "ocultos".
+      extra = extra.filter((value) => value !== rid);
+      excluded = unique([...excluded, rid]);
+    }
 
     await setDoc(
       ref,
       removeUndefinedFields({
-        extraResourceIds: next,
-        recursosAsignados: next,
+        extraResourceIds: extra,
+        recursosAsignados: extra,
+        excludedResourceIds: excluded,
+        recursosOcultos: excluded,
         updatedAt: serverTimestamp(),
       }),
       { merge: true }
     );
 
-    return next;
+    return { extraResourceIds: extra, excludedResourceIds: excluded };
   } catch (error) {
-    throw withContextError(error, "assignResourceToStudent");
+    throw withContextError(error, "setStudentResourceVisibility");
   }
 }
 
+/* Compatibilidad: asignar = mostrar; quitar = ocultar. */
+export async function assignResourceToStudent(studentId, resourceId, assign = true) {
+  return setStudentResourceVisibility(studentId, resourceId, assign);
+}
+
 export async function unassignResourceFromStudent(studentId, resourceId) {
-  return assignResourceToStudent(studentId, resourceId, false);
+  return setStudentResourceVisibility(studentId, resourceId, false);
 }
 
 /*
@@ -2539,26 +2589,18 @@ export async function listResources(options = {}) {
       - extraResourceIds / recursosAsignados: recursos forzados a aparecer aunque
         el filtro (o incluso el estado de publicación) los ocultaría.
     */
-    const showAllResources = getStudentShowAllResources(studentData);
-    const extraResourceIds = getStudentExtraResourceIds(studentData);
+    const visibilityCtx = {
+      student: studentData,
+      activeOnly,
+      showAll: getStudentShowAllResources(studentData),
+      assigned: getStudentExtraResourceIds(studentData),
+      excluded: getStudentExcludedResourceIds(studentData),
+    };
 
     let resources = docsToObjects(snap)
       .map((item) => normalizeResource(item))
       .filter(Boolean)
-      .filter((resource) => {
-        const assigned = extraResourceIds.has(safeText(resource.id));
-
-        // Recurso asignado manualmente: siempre se muestra.
-        if (assigned) return true;
-
-        // El resto respeta el estado de publicación.
-        if (activeOnly && !isPublishedResource(resource)) return false;
-
-        // Override "ver todo": muestra cualquier recurso publicado.
-        if (showAllResources) return true;
-
-        return resourceMatchesStudent(resource, studentData);
-      });
+      .filter((resource) => isResourceVisibleForStudent(resource, visibilityCtx));
 
     resources = sortByText(resources, "title", "asc");
 
@@ -2592,8 +2634,13 @@ export async function diagnoseResources(options = {}) {
 
   const all = docsToObjects(snap).map((item) => normalizeResource(item)).filter(Boolean);
 
-  const showAllResources = getStudentShowAllResources(studentData);
-  const extraResourceIds = getStudentExtraResourceIds(studentData);
+  const visibilityCtx = {
+    student: studentData,
+    activeOnly: true,
+    showAll: getStudentShowAllResources(studentData),
+    assigned: getStudentExtraResourceIds(studentData),
+    excluded: getStudentExcludedResourceIds(studentData),
+  };
 
   const visibles = [];
   const ocultos = [];
@@ -2603,10 +2650,10 @@ export async function diagnoseResources(options = {}) {
     const publicado = isPublishedResource(r);
     const matchInstrumento = resourceMentionsStudentInstrument(collectResourceTerms(r), studentAreas);
     const matchEstudiante = resourceMatchesStudent(r, studentData);
-    const asignado = extraResourceIds.has(id);
+    const asignado = visibilityCtx.assigned.has(id);
+    const oculto = visibilityCtx.excluded.has(id);
 
-    // Misma lógica que listResources: asignado manual o (publicado y (verTodo o filtro)).
-    const visible = asignado || (publicado && (showAllResources || matchEstudiante));
+    const visible = isResourceVisibleForStudent(r, visibilityCtx);
 
     const fila = {
       id,
@@ -2616,6 +2663,7 @@ export async function diagnoseResources(options = {}) {
       estado: r.estado || "(sin estado)",
       publicado,
       asignado,
+      oculto,
       mencionaInstrumento: matchInstrumento,
       pasaFiltroArea: matchEstudiante,
       visible,
@@ -2655,8 +2703,9 @@ export async function diagnoseResources(options = {}) {
     totalBiblioteca: all.length,
     visibles: visibles.length,
     ocultos: ocultos.length,
-    verTodoSinFiltro: showAllResources,
-    asignadosManualmente: extraResourceIds.size,
+    verTodoSinFiltro: visibilityCtx.showAll,
+    asignadosManualmente: visibilityCtx.assigned.size,
+    ocultosManualmente: visibilityCtx.excluded.size,
   };
 
   console.log("[DIAG recursos] Resumen:", resumen);

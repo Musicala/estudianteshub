@@ -1792,10 +1792,10 @@ async function renderResources(deps) {
     items = await api.listResources({
       student,
       studentId: getStudentId(ctx),
-      max: 80,
+      max: 120,
     }).catch(() => []);
   } else if (typeof api.listLibraryPins === "function") {
-    items = await api.listLibraryPins(getStudentId(ctx), 80).catch(() => []);
+    items = await api.listLibraryPins(getStudentId(ctx), 120).catch(() => []);
   }
 
   const resources = normalizeResources(items);
@@ -1816,54 +1816,17 @@ async function renderResources(deps) {
     `;
   }
 
-  const categoryGroups = groupBy(resources, getResourceCategory);
+  // Cada vez que entras a Recursos empiezas en la raíz (vista de artes).
+  RES_NAV.arte = null;
+  RES_NAV.area = null;
+  RES_NAV.tema = null;
+  RES_NAV.search = "";
+  RES_NAV.tipo = "";
+  RES_NAV.shown = 60;
 
-  const categoryChips = `
-    <div class="chips">
-      ${categoryGroups.map(([category, list]) =>
-        chip(`${category}: ${list.length}`, "ghost")
-      ).join("")}
-    </div>
-  `;
-
-  const resourceSections = `
-    <div class="resource-board">
-      ${categoryGroups.map(([category, list], index) =>
-        renderResourceTopicSection(category, list, index)
-      ).join("")}
-    </div>
-  `;
-
-  const listHTML = resources.map((resource) => {
-    const url = getResourceUrl(resource);
-
-    return itemRow({
-      title: resource.title || resource.titulo || "Recurso",
-      meta: getResourceLabel(resource) || "Material de apoyo",
-      href: url || "",
-      external: true,
-      side: url ? "Abrir ›" : "",
-      icon: resource.icon || "▦",
-    });
-  }).join("");
-
-  const searchHTML = `
-    <div class="resource-search">
-      <span class="resource-search__icon" aria-hidden="true">🔎</span>
-      <input
-        id="resourceSearch"
-        class="resource-search__input"
-        type="search"
-        inputmode="search"
-        autocomplete="off"
-        placeholder="Buscar recurso por nombre, tema o tipo…"
-        aria-label="Buscar recursos"
-      />
-    </div>
-    <p id="resourceSearchEmpty" class="note" hidden>
-      No encontramos recursos con ese término. Prueba con otra palabra.
-    </p>
-  `;
+  const tipos = [...new Set(
+    resources.map((r) => uiSafeText(r.tipo || r.type)).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, "es"));
 
   const html = `
     ${viewHeader("Recursos", studentSubtitle(ctx), {
@@ -1872,78 +1835,358 @@ async function renderResources(deps) {
 
     ${resourceAdminButton(ctx)}
 
-    ${stack(`
-      ${card({
-        title: "Explorar recursos",
-        subtitle: "Encuentra materiales de tu área organizados por tema.",
-        bodyHTML: `
-          ${searchHTML}
-          ${categoryChips}
-        `,
-      })}
-
-      ${resourceSections}
-
-      ${card({
-        title: "Índice completo",
-        subtitle: "Todos los recursos disponibles para este proceso, en formato compacto.",
-        bodyHTML: `<div class="list">${listHTML}</div>`,
-      })}
-    `)}
+    <div class="biblio">
+      <div class="biblioToolbar">
+        <input
+          type="search"
+          id="biblioSearch"
+          class="biblioSearchInput"
+          placeholder="Buscar en toda la biblioteca…"
+          autocomplete="off"
+          aria-label="Buscar recursos"
+        />
+        <select id="biblioTipo" class="biblioSelect" aria-label="Filtrar por tipo">
+          <option value="">Tipo: todos</option>
+          ${tipos.map((t) => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join("")}
+        </select>
+      </div>
+      <nav class="biblioCrumbs" id="biblioCrumbs" aria-label="Ruta de carpetas"></nav>
+      <p class="biblioMeta" id="biblioMeta"></p>
+      <div class="biblioGrid" id="biblioGrid"></div>
+      <div class="biblioMore" id="biblioMoreWrap" hidden>
+        <button class="btn btn--ghost btn--sm" id="biblioMoreBtn" type="button">Mostrar más</button>
+      </div>
+    </div>
   `;
 
   return {
     html,
-    afterRender: () => wireResourceSearch(),
+    afterRender: () => wireBiblioteca(resources),
   };
 }
 
-/*
-  Filtro en vivo de recursos. Oculta los ítems que no coinciden con el texto
-  y, de paso, esconde las áreas/categorías que quedan vacías.
-*/
-function wireResourceSearch() {
+/* =============================================================================
+  Biblioteca de recursos — navegación tipo carpetas (arte → área → tema → recursos)
+  Inspirada en el sistema visual del HUB de Docentes.
+============================================================================= */
+
+const RES_NAV = { arte: null, area: null, tema: null, search: "", tipo: "", shown: 60 };
+
+function bibNorm(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
+}
+
+// Arte macro (Música / Danzas / Artes plásticas / Teatro) a partir del área.
+function bibMacroArea(areaRaw) {
+  const a = bibNorm(areaRaw);
+  if (!a) return "General";
+  if (/(sala de profesores|vacacional)/.test(a)) return "General";
+  if (/(ballet|danza|baile)/.test(a)) return "Danzas";
+  if (/(dibujo|pintura|escultura|plastic|manualidad|ceramica)/.test(a)) return "Artes plásticas";
+  if (/(teatro|actuacion|impro|dramat)/.test(a)) return "Teatro";
+  return "Música";
+}
+
+// Tono estable por carpeta para reconocerlas de un vistazo.
+function bibHue(name) {
+  const s = bibNorm(name || "general");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+function bibEmoji(area) {
+  const a = bibNorm(area);
+  if (a.includes("guitarra") || a.includes("bajo")) return "🎸";
+  if (a.includes("piano") || a.includes("teclado")) return "🎹";
+  if (a.includes("bateria") || a.includes("percusion")) return "🥁";
+  if (a.includes("violin") || a.includes("cello") || a.includes("cuerda")) return "🎻";
+  if (a.includes("canto") || a.includes("voz") || a.includes("coro")) return "🎤";
+  if (a.includes("danza") || a.includes("ballet") || a.includes("baile")) return "💃";
+  if (a.includes("teatro")) return "🎭";
+  if (a.includes("plastica") || a.includes("dibujo") || a.includes("pintura") || a.includes("arte")) return "🎨";
+  if (a.includes("musica")) return "🎵";
+  return "📁";
+}
+
+function bibLinkKind(url = "", titulo = "") {
+  const u = bibNorm(url);
+  const t = bibNorm(titulo);
+  if (u.includes(".pdf") || t.includes("pdf")) return { icon: "📄", kind: "PDF" };
+  if (u.includes("youtube.") || u.includes("youtu.be") || u.includes("vimeo.")) return { icon: "▶️", kind: "Video" };
+  if (/\.(mp3|wav|m4a|ogg)\b/.test(u)) return { icon: "🎧", kind: "Audio" };
+  if (/\.(png|jpe?g|gif|webp)\b/.test(u)) return { icon: "🖼️", kind: "Imagen" };
+  if (u.includes("classroom.google")) return { icon: "🎓", kind: "Classroom" };
+  if (u.includes("docs.google") || /\.(docx?|odt)\b/.test(u)) return { icon: "📝", kind: "Documento" };
+  if (u.includes("drive.google")) return { icon: "📁", kind: "Archivo" };
+  return { icon: "🌐", kind: "Enlace" };
+}
+
+function bibResourceLinks(resource = {}) {
+  const raw = Array.isArray(resource.links) && resource.links.length
+    ? resource.links
+    : Array.isArray(resource.enlaces)
+      ? resource.enlaces
+      : [];
+
+  const list = raw
+    .map((l) => ({
+      url: uiSafeText(l?.url || l?.href),
+      title: uiSafeText(l?.title || l?.titulo),
+    }))
+    .filter((l) => /^https?:\/\//i.test(l.url));
+
+  // Si no hay enlaces detallados, usamos el enlace principal del recurso.
+  if (!list.length) {
+    const main = getResourceUrl(resource);
+    if (/^https?:\/\//i.test(main)) {
+      list.push({ url: main, title: resource.title || resource.titulo || "Abrir recurso" });
+    }
+  }
+
+  return list;
+}
+
+function renderBiblioCard(resource = {}) {
+  const area = uiSafeText(resource.area || resource.instrument || resource.instrumento) || "general";
+  const tema = uiSafeText(resource.tema);
+  const tipo = uiSafeText(resource.tipo || resource.type);
+  const desc = uiSafeText(resource.description || resource.descripcion);
+  const tags = safeArray(resource.tags || resource.etiquetas).map((t) => uiSafeText(t)).filter(Boolean);
+  const hue = bibHue(area);
+
+  const linksHTML = bibResourceLinks(resource)
+    .map((l, i) => {
+      const label = l.title || `Recurso ${i + 1}`;
+      const { icon, kind } = bibLinkKind(l.url, label);
+      return `
+        <a class="biblioLinkBtn" href="${escapeAttr(l.url)}" target="_blank" rel="noopener noreferrer" title="${escapeAttr(label)}">
+          <span class="biblioLinkIcon" aria-hidden="true">${icon}</span>
+          <span class="biblioLinkInfo">
+            <span class="biblioLinkKind">${escapeHtml(kind)}</span>
+            <span class="biblioLinkName">${escapeHtml(label)}</span>
+          </span>
+          <span class="biblioLinkOpen">Abrir ↗</span>
+        </a>
+      `;
+    })
+    .join("");
+
+  return `
+    <article class="biblioCard" style="--areaHue:${hue}">
+      <div class="biblioCardTop">
+        <span class="biblioArea">${bibEmoji(area)} ${escapeHtml(area)}</span>
+        ${tipo ? `<span class="biblioTipo">${escapeHtml(tipo)}</span>` : ""}
+      </div>
+      <h3 class="biblioTitle">${escapeHtml(uiSafeText(resource.title || resource.titulo) || "Sin título")}</h3>
+      ${tema ? `<p class="biblioTema">📂 ${escapeHtml(tema)}</p>` : ""}
+      ${desc ? `<p class="biblioDesc">${escapeHtml(desc.slice(0, 220))}</p>` : ""}
+      ${tags.length ? `<div class="biblioTags">${tags.slice(0, 6).map((t) => `<span>${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+      ${linksHTML ? `<div class="biblioLinks">${linksHTML}</div>` : ""}
+    </article>
+  `;
+}
+
+function wireBiblioteca(resources) {
   const root = viewRoot();
   if (!root) return;
 
-  const input = root.querySelector("#resourceSearch");
-  const emptyNote = root.querySelector("#resourceSearchEmpty");
-  if (!input) return;
+  const grid = root.querySelector("#biblioGrid");
+  const crumbs = root.querySelector("#biblioCrumbs");
+  const meta = root.querySelector("#biblioMeta");
+  const moreWrap = root.querySelector("#biblioMoreWrap");
+  const searchInput = root.querySelector("#biblioSearch");
+  const tipoSelect = root.querySelector("#biblioTipo");
+  if (!grid) return;
 
-  const normalize = (value = "") =>
-    String(value)
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "");
+  // Agrupación arte → área → tema → recursos.
+  const byArte = new Map();
+  for (const r of resources) {
+    const arte = bibMacroArea(r.area || r.instrument || r.instrumento);
+    const area = uiSafeText(r.area || r.instrument || r.instrumento) || "General";
+    const tema = uiSafeText(r.tema) || "Sin tema";
+    if (!byArte.has(arte)) byArte.set(arte, new Map());
+    const byArea = byArte.get(arte);
+    if (!byArea.has(area)) byArea.set(area, new Map());
+    const temas = byArea.get(area);
+    if (!temas.has(tema)) temas.set(tema, []);
+    temas.get(tema).push(r);
+  }
 
-  // Tarjetas del tablero (.resource-card) e ítems del índice (.item).
-  const items = Array.from(root.querySelectorAll(".resource-card, .item"));
+  const arteNames = [...byArte.keys()].sort((a, b) => {
+    if (a === "General") return 1;
+    if (b === "General") return -1;
+    return a.localeCompare(b, "es");
+  });
 
-  const apply = () => {
-    const query = normalize(input.value.trim());
-    let anyVisible = false;
+  const arteCount = (arte) =>
+    [...byArte.get(arte).values()].reduce(
+      (acc, temas) => acc + [...temas.values()].reduce((s, arr) => s + arr.length, 0),
+      0
+    );
 
-    items.forEach((item) => {
-      const match = !query || normalize(item.textContent).includes(query);
-      item.hidden = !match;
-      if (match) anyVisible = true;
+  const folderCard = ({ emoji, name, count, sub, nav }) => `
+    <button class="biblioFolder" type="button" data-nav="${escapeAttr(nav)}" style="--folderHue:${bibHue(name)}">
+      <span class="biblioFolderIcon" aria-hidden="true">${emoji}</span>
+      <span class="biblioFolderName">${escapeHtml(name)}</span>
+      <span class="biblioFolderMeta">${sub ? `${escapeHtml(sub)} · ` : ""}${count} recurso(s)</span>
+    </button>
+  `;
+
+  // Si una carpeta guardada ya no existe, vuelve al nivel válido.
+  if (RES_NAV.arte && !byArte.has(RES_NAV.arte)) { RES_NAV.arte = null; RES_NAV.area = null; RES_NAV.tema = null; }
+  if (RES_NAV.area && !byArte.get(RES_NAV.arte)?.has(RES_NAV.area)) { RES_NAV.area = null; RES_NAV.tema = null; }
+  if (RES_NAV.tema && !byArte.get(RES_NAV.arte)?.get(RES_NAV.area)?.has(RES_NAV.tema)) { RES_NAV.tema = null; }
+
+  const paintCrumbs = () => {
+    if (!crumbs) return;
+    const searching = !!bibNorm(RES_NAV.search);
+    const parts = [`<button class="biblioCrumb" type="button" data-crumb="root">📚 Inicio</button>`];
+    if (RES_NAV.arte) {
+      parts.push(`<span class="biblioCrumbSep">›</span>`);
+      parts.push((RES_NAV.area || RES_NAV.tema)
+        ? `<button class="biblioCrumb" type="button" data-crumb="arte">${bibEmoji(RES_NAV.arte)} ${escapeHtml(RES_NAV.arte)}</button>`
+        : `<span class="biblioCrumbHere">${bibEmoji(RES_NAV.arte)} ${escapeHtml(RES_NAV.arte)}</span>`);
+    }
+    if (RES_NAV.area) {
+      parts.push(`<span class="biblioCrumbSep">›</span>`);
+      parts.push(RES_NAV.tema
+        ? `<button class="biblioCrumb" type="button" data-crumb="area">${bibEmoji(RES_NAV.area)} ${escapeHtml(RES_NAV.area)}</button>`
+        : `<span class="biblioCrumbHere">${bibEmoji(RES_NAV.area)} ${escapeHtml(RES_NAV.area)}</span>`);
+    }
+    if (RES_NAV.tema) {
+      parts.push(`<span class="biblioCrumbSep">›</span><span class="biblioCrumbHere">📂 ${escapeHtml(RES_NAV.tema)}</span>`);
+    }
+    if (searching) {
+      parts.push(`<span class="biblioCrumbSep">›</span><span class="biblioCrumbHere">🔎 Resultados</span>`);
+    }
+    crumbs.innerHTML = parts.join("");
+    crumbs.querySelectorAll("[data-crumb]").forEach((b) => {
+      b.addEventListener("click", () => {
+        if (b.dataset.crumb === "root") {
+          RES_NAV.arte = null; RES_NAV.area = null; RES_NAV.tema = null; RES_NAV.search = "";
+          if (searchInput) searchInput.value = "";
+        } else if (b.dataset.crumb === "arte") {
+          RES_NAV.area = null; RES_NAV.tema = null;
+        } else {
+          RES_NAV.tema = null;
+        }
+        RES_NAV.shown = 60;
+        paint();
+      });
     });
-
-    // Áreas y categorías: se ocultan si ya no tienen tarjetas visibles.
-    root.querySelectorAll(".resource-category, .resource-area").forEach((section) => {
-      const hasVisible = Array.from(
-        section.querySelectorAll(".resource-card, .item")
-      ).some((item) => !item.hidden);
-      section.hidden = !hasVisible;
-      if (query && hasVisible && section.tagName === "DETAILS") {
-        section.open = true;
-      }
-    });
-
-    if (emptyNote) emptyNote.hidden = anyVisible || !query;
   };
 
-  input.addEventListener("input", apply);
+  const paintRecursos = (lista) => {
+    const filtered = RES_NAV.tipo
+      ? lista.filter((r) => uiSafeText(r.tipo || r.type) === RES_NAV.tipo)
+      : lista;
+    if (!filtered.length) {
+      grid.classList.remove("biblioGridFolders");
+      grid.innerHTML = `<div class="biblioEmpty"><h2>Sin resultados</h2><p>Prueba con otra búsqueda o quita los filtros.</p></div>`;
+      if (moreWrap) moreWrap.hidden = true;
+      return 0;
+    }
+    grid.classList.remove("biblioGridFolders");
+    grid.innerHTML = filtered.slice(0, RES_NAV.shown).map(renderBiblioCard).join("");
+    if (moreWrap) moreWrap.hidden = filtered.length <= RES_NAV.shown;
+    return filtered.length;
+  };
+
+  const paint = () => {
+    paintCrumbs();
+
+    const scopeLabel = RES_NAV.tema || RES_NAV.area || RES_NAV.arte;
+    if (searchInput) {
+      searchInput.placeholder = scopeLabel ? `Buscar en ${scopeLabel}…` : "Buscar en toda la biblioteca…";
+    }
+
+    const term = bibNorm(RES_NAV.search);
+    if (term) {
+      let source = resources;
+      if (RES_NAV.arte) source = source.filter((r) => bibMacroArea(r.area || r.instrument || r.instrumento) === RES_NAV.arte);
+      if (RES_NAV.area) source = source.filter((r) => (uiSafeText(r.area || r.instrument || r.instrumento) || "General") === RES_NAV.area);
+      if (RES_NAV.tema) source = source.filter((r) => (uiSafeText(r.tema) || "Sin tema") === RES_NAV.tema);
+
+      const matches = source.filter((r) => {
+        const hay = bibNorm([
+          r.title, r.titulo, r.tema, r.area, r.tipo, r.type, r.description, r.descripcion,
+          ...safeArray(r.tags || r.etiquetas),
+        ].filter(Boolean).join(" "));
+        return hay.includes(term);
+      });
+      const n = paintRecursos(matches);
+      if (meta) meta.textContent = `${n} resultado(s)${scopeLabel ? ` en ${scopeLabel}` : ""}`;
+      return;
+    }
+
+    if (!RES_NAV.arte) {
+      grid.classList.add("biblioGridFolders");
+      grid.innerHTML = arteNames.map((arte) => {
+        const byArea = byArte.get(arte);
+        return folderCard({ emoji: bibEmoji(arte), name: arte, count: arteCount(arte), sub: `${byArea.size} área(s)`, nav: `arte:${arte}` });
+      }).join("");
+      if (moreWrap) moreWrap.hidden = true;
+      if (meta) meta.textContent = `${arteNames.length} arte(s) · ${resources.length} recurso(s)`;
+    } else if (!RES_NAV.area) {
+      const byArea = byArte.get(RES_NAV.arte);
+      const areaNames = [...byArea.keys()].sort((a, b) => a.localeCompare(b, "es"));
+      grid.classList.add("biblioGridFolders");
+      grid.innerHTML = areaNames.map((a) => {
+        const temas = byArea.get(a);
+        const total = [...temas.values()].reduce((acc, arr) => acc + arr.length, 0);
+        return folderCard({ emoji: bibEmoji(a), name: a, count: total, sub: `${temas.size} tema(s)`, nav: `area:${a}` });
+      }).join("");
+      if (moreWrap) moreWrap.hidden = true;
+      if (meta) meta.textContent = `${areaNames.length} área(s)`;
+    } else if (!RES_NAV.tema) {
+      const temas = byArte.get(RES_NAV.arte).get(RES_NAV.area);
+      const temaNames = [...temas.keys()].sort((a, b) => a.localeCompare(b, "es"));
+      grid.classList.add("biblioGridFolders");
+      grid.innerHTML = temaNames.map((t) =>
+        folderCard({ emoji: "📂", name: t, count: temas.get(t).length, sub: "", nav: `tema:${t}` })
+      ).join("");
+      if (moreWrap) moreWrap.hidden = true;
+      if (meta) meta.textContent = `${temaNames.length} tema(s)`;
+    } else {
+      const lista = byArte.get(RES_NAV.arte).get(RES_NAV.area).get(RES_NAV.tema) || [];
+      const n = paintRecursos(lista);
+      if (meta) meta.textContent = `${n} recurso(s)`;
+    }
+
+    grid.querySelectorAll("[data-nav]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const [kind, ...rest] = b.dataset.nav.split(":");
+        const value = rest.join(":");
+        if (kind === "arte") RES_NAV.arte = value;
+        else if (kind === "area") RES_NAV.area = value;
+        else RES_NAV.tema = value;
+        RES_NAV.shown = 60;
+        paint();
+      });
+    });
+  };
+
+  searchInput?.addEventListener("input", (e) => {
+    RES_NAV.search = e.target.value;
+    RES_NAV.shown = 60;
+    paint();
+  });
+  tipoSelect?.addEventListener("change", (e) => {
+    RES_NAV.tipo = e.target.value;
+    RES_NAV.shown = 60;
+    paint();
+  });
+  moreWrap?.querySelector("#biblioMoreBtn")?.addEventListener("click", () => {
+    RES_NAV.shown += 60;
+    paint();
+  });
+
+  paint();
 }
 
 /* =============================================================================

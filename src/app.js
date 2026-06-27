@@ -1336,6 +1336,7 @@ let resourceAdmin = null;
 
 function resourceIsVisible(row) {
   if (!resourceAdmin) return false;
+  if (resourceAdmin.excluded.has(row.id)) return false;
   if (resourceAdmin.assigned.has(row.id)) return true;
   return Boolean(row.publicado) && (resourceAdmin.verTodo || Boolean(row.pasaFiltroArea));
 }
@@ -1386,6 +1387,7 @@ async function openResourceAdmin() {
       studentId,
       verTodo: Boolean(diag?.resumen?.verTodoSinFiltro),
       assigned: new Set(rows.filter((row) => row.asignado).map((row) => row.id)),
+      excluded: new Set(rows.filter((row) => row.oculto).map((row) => row.id)),
       rows,
       filter: "",
       dirty: false,
@@ -1413,14 +1415,14 @@ function renderResourceAdminBody() {
     .map((row) => {
       const visible = resourceIsVisible(row);
       const assigned = resourceAdmin.assigned.has(row.id);
+      const excluded = resourceAdmin.excluded.has(row.id);
 
-      const motivo = !row.publicado
-        ? "no publicado"
-        : visible
-          ? assigned && !row.pasaFiltroArea && !resourceAdmin.verTodo
-            ? "asignado a mano"
-            : "coincide con su proceso"
-          : "fuera de su arte/instrumento";
+      let motivo;
+      if (excluded) motivo = "ocultado a mano";
+      else if (!row.publicado) motivo = "no publicado";
+      else if (assigned && !row.pasaFiltroArea && !resourceAdmin.verTodo) motivo = "puesto a mano";
+      else if (visible) motivo = "incluido por su proceso";
+      else motivo = "fuera de su arte/instrumento";
 
       return `
         <div class="pick-item" data-resource-row="${escapeHtml(row.id)}" style="display:flex;gap:8px;align-items:center;justify-content:space-between">
@@ -1433,12 +1435,12 @@ function renderResourceAdminBody() {
             </div>
           </div>
           <button
-            class="btn ${assigned ? "btn--ghost" : "btn--primary"} btn--sm"
+            class="btn ${visible ? "btn--ghost" : "btn--primary"} btn--sm"
             type="button"
-            data-assign-id="${escapeHtml(row.id)}"
-            data-assign-next="${assigned ? "0" : "1"}"
+            data-visible-id="${escapeHtml(row.id)}"
+            data-visible-next="${visible ? "0" : "1"}"
           >
-            ${assigned ? "Quitar" : "Asignar"}
+            ${visible ? "Quitar" : "Poner"}
           </button>
         </div>
       `;
@@ -1521,22 +1523,27 @@ function wireResourceAdminBody() {
   });
 
   body.querySelector("#resourceAdminList")?.addEventListener("click", async (event) => {
-    const btn = event.target?.closest?.("[data-assign-id]");
+    const btn = event.target?.closest?.("[data-visible-id]");
     if (!btn) return;
 
-    const id = btn.getAttribute("data-assign-id");
-    const assign = btn.getAttribute("data-assign-next") === "1";
+    const id = btn.getAttribute("data-visible-id");
+    const makeVisible = btn.getAttribute("data-visible-next") === "1";
     if (!id) return;
 
     btn.disabled = true;
     try {
-      await api.assignResourceToStudent(resourceAdmin.studentId, id, assign);
-      if (assign) resourceAdmin.assigned.add(id);
-      else resourceAdmin.assigned.delete(id);
+      await api.setStudentResourceVisibility(resourceAdmin.studentId, id, makeVisible);
+      if (makeVisible) {
+        resourceAdmin.assigned.add(id);
+        resourceAdmin.excluded.delete(id);
+      } else {
+        resourceAdmin.assigned.delete(id);
+        resourceAdmin.excluded.add(id);
+      }
       resourceAdmin.dirty = true;
       renderResourceAdminBody();
     } catch (error) {
-      console.error("[App] No se pudo asignar/quitar el recurso:", error);
+      console.error("[App] No se pudo cambiar la visibilidad del recurso:", error);
       toast("No se pudo guardar el cambio.", "danger");
       btn.disabled = false;
     }
