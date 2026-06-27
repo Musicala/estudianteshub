@@ -342,6 +342,7 @@ export const ACCESS_CONFIG = Object.freeze({
     "alekcaballeromusic@gmail.com",
     "catalina.medina.leal@gmail.com",
     "imusicala@gmail.com",
+    "adminmusicala@gmail.com",
     "musicalaasesor@gmail.com",
   ]),
 
