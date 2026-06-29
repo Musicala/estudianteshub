@@ -3377,16 +3377,19 @@ textarea.input {
 @media (max-width: 390px) {
   .bottom-nav__text,
   .bn-txt {
-    display: none;
+    display: block;
+    font-size: 0.56rem;
+    letter-spacing: -0.035em;
   }
 
   .bottom-nav__item {
-    min-height: 50px;
+    min-height: 56px;
+    padding-inline: 2px;
   }
 
   .bottom-nav__icon,
   .bn-ico {
-    font-size: 1.15rem;
+    font-size: 1rem;
   }
 
   .brand__title {
