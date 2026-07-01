@@ -221,22 +221,23 @@ service cloud.firestore {
     // Mensajes estudiante ↔ docente
     match /student_messages/{studentId} {
       allow read: if isAdmin() ||
-        (isTeacher() && resource.data.teacherEmail == authEmail()) ||
+        (isSignedIn() && resource.data.teacherEmail == authEmail()) ||
         (isActiveStudent() && studentId in linkedStudentIds());
       allow create: if isAdmin() || (isActiveStudent() &&
         studentId in linkedStudentIds() &&
         request.resource.data.studentId == studentId &&
-        request.resource.data.teacherEmail in teacherEmailList());
+        request.resource.data.teacherEmail is string &&
+        request.resource.data.teacherEmail != "");
       allow update: if isAdmin() ||
         (isActiveStudent() && studentId in linkedStudentIds() &&
           request.resource.data.studentId == studentId &&
           request.resource.data.teacherEmail in teacherEmailList()) ||
-        (isTeacher() && resource.data.teacherEmail == authEmail() &&
+        (isSignedIn() && resource.data.teacherEmail == authEmail() &&
           request.resource.data.teacherEmail == authEmail());
 
       match /messages/{msgId} {
         allow read: if isAdmin() ||
-          (isTeacher() &&
+          (isSignedIn() &&
             get(/databases/$(database)/documents/student_messages/$(studentId)).data.teacherEmail == authEmail()) ||
           (isActiveStudent() && studentId in linkedStudentIds());
         allow create: if
@@ -244,12 +245,12 @@ service cloud.firestore {
           request.resource.data.teacherEmail ==
             get(/databases/$(database)/documents/student_messages/$(studentId)).data.teacherEmail &&
           (isAdmin() ||
-            (isTeacher() && request.resource.data.senderRole == "teacher" &&
+            (isSignedIn() && request.resource.data.senderRole == "teacher" &&
               request.resource.data.teacherEmail == authEmail()) ||
             (isActiveStudent() && studentId in linkedStudentIds() &&
               request.resource.data.senderRole == "student"));
         allow update: if isAdmin() ||
-          (isTeacher() &&
+          (isSignedIn() &&
             get(/databases/$(database)/documents/student_messages/$(studentId)).data.teacherEmail == authEmail()) ||
           (isActiveStudent() && studentId in linkedStudentIds() &&
             resource.data.senderRole == "teacher");
