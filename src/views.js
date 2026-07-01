@@ -3433,8 +3433,8 @@ async function renderMessages(deps) {
       })}
 
       ${card({
-        title: "Nota",
-        bodyHTML: `<p class="note">Los mensajes son revisados por el equipo de Musicala. Para urgencias, contacta directamente a tu docente por el canal habitual.</p>`,
+        title: "Uso de este canal",
+        bodyHTML: `<p class="note">Este canal es exclusivamente para preguntas académicas sobre tus clases, ejercicios, tareas y proceso de aprendizaje. Por favor, mantén siempre una comunicación respetuosa. Los temas de pagos, programación de clases, cambios de horario y demás solicitudes administrativas deben tratarse por el canal habitual de WhatsApp con nuestro equipo administrativo.</p>`,
       })}
     `)}
   `;
