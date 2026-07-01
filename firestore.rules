@@ -231,9 +231,11 @@ service cloud.firestore {
       allow update: if isAdmin() ||
         (isActiveStudent() && studentId in linkedStudentIds() &&
           request.resource.data.studentId == studentId &&
-          request.resource.data.teacherEmail in teacherEmailList()) ||
+          request.resource.data.teacherEmail is string &&
+          request.resource.data.teacherEmail != "") ||
         (isSignedIn() && resource.data.teacherEmail == authEmail() &&
           request.resource.data.teacherEmail == authEmail());
+      allow delete: if isAdmin();
 
       match /messages/{msgId} {
         allow read: if isAdmin() ||
