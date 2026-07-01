@@ -3351,10 +3351,6 @@ export async function listMessages(studentId, max = 60) {
     assertNonEmptyString(id, "studentId");
 
     const messagesRef = collection(db, COLLECTIONS.studentMessages, id, "messages");
-    const conversation = await getMessageConversation(id);
-    const teacherEmail = safeText(payload.teacherEmail || conversation?.teacherEmail).toLowerCase();
-    if (!teacherEmail) throw new Error("Primero elige el docente que recibirá el mensaje.");
-
     const q = query(messagesRef, orderBy("createdAt", "asc"), limit(clampLimit(max, 60, 200)));
     const snap = await getDocs(q);
 
@@ -3375,6 +3371,9 @@ export async function sendStudentMessage(studentId, payload = {}) {
     if (!text) throw new Error("El mensaje no puede estar vacío.");
 
     const messagesRef = collection(db, COLLECTIONS.studentMessages, id, "messages");
+    const conversation = await getMessageConversation(id);
+    const teacherEmail = safeText(payload.teacherEmail || conversation?.teacherEmail).toLowerCase();
+    if (!teacherEmail) throw new Error("Primero elige el docente que recibirá el mensaje.");
 
     const msgData = removeUndefinedFields({
       studentId: id,
