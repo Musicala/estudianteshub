@@ -220,19 +220,46 @@ service cloud.firestore {
 
     // Mensajes estudiante ↔ docente
     match /student_messages/{studentId} {
-      allow read: if isAdmin() || isTeacher() ||
+      allow read: if isAdmin() ||
+        (isTeacher() && resource.data.teacherEmail == authEmail()) ||
         (isActiveStudent() && studentId in linkedStudentIds());
-      allow write: if isAdmin();
+      allow create: if isAdmin() || (isActiveStudent() &&
+        studentId in linkedStudentIds() &&
+        request.resource.data.studentId == studentId &&
+        request.resource.data.teacherEmail in teacherEmailList());
+      allow update: if isAdmin() ||
+        (isActiveStudent() && studentId in linkedStudentIds() &&
+          request.resource.data.studentId == studentId &&
+          request.resource.data.teacherEmail in teacherEmailList()) ||
+        (isTeacher() && resource.data.teacherEmail == authEmail() &&
+          request.resource.data.teacherEmail == authEmail());
 
       match /messages/{msgId} {
-        allow read: if isAdmin() || isTeacher() ||
+        allow read: if isAdmin() ||
+          (isTeacher() &&
+            get(/databases/$(database)/documents/student_messages/$(studentId)).data.teacherEmail == authEmail()) ||
           (isActiveStudent() && studentId in linkedStudentIds());
         allow create: if
-          (isAdmin() || isTeacher() ||
-            (isActiveStudent() && studentId in linkedStudentIds())) &&
-          request.resource.data.studentId == studentId;
-        allow update, delete: if isAdmin() || isTeacher();
+          request.resource.data.studentId == studentId &&
+          request.resource.data.teacherEmail ==
+            get(/databases/$(database)/documents/student_messages/$(studentId)).data.teacherEmail &&
+          (isAdmin() ||
+            (isTeacher() && request.resource.data.senderRole == "teacher" &&
+              request.resource.data.teacherEmail == authEmail()) ||
+            (isActiveStudent() && studentId in linkedStudentIds() &&
+              request.resource.data.senderRole == "student"));
+        allow update: if isAdmin() ||
+          (isTeacher() &&
+            get(/databases/$(database)/documents/student_messages/$(studentId)).data.teacherEmail == authEmail()) ||
+          (isActiveStudent() && studentId in linkedStudentIds() &&
+            resource.data.senderRole == "teacher");
+        allow delete: if isAdmin();
       }
+    }
+
+    match /teacher_directory/{teacherEmail} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
   }
 }

@@ -3324,12 +3324,13 @@ function renderChatThread(messages = [], currentUserId = "") {
   }).join("");
 }
 
-function wireMessagesView(deps, studentId, currentUserId) {
+function wireMessagesView(deps, studentId, currentUserId, conversation, teachers) {
   const api       = getApi(deps);
   const ctx       = getCtx(deps);
   const threadEl  = document.getElementById("chatThread");
   const inputEl   = document.getElementById("chatInput");
   const sendBtn   = document.getElementById("chatSend");
+  const teacherSelect = document.getElementById("chatTeacher");
 
   const EMPTY_MSG = `<p class="note" style="text-align:center;padding:24px 0;">Aún no hay mensajes. Cuando tu docente te escriba, aparecerán aquí.</p>`;
 
@@ -3341,6 +3342,7 @@ function wireMessagesView(deps, studentId, currentUserId) {
       const html = renderChatThread(msgs || [], currentUserId);
       threadEl.innerHTML = html || EMPTY_MSG;
       threadEl.scrollTop = threadEl.scrollHeight;
+      api.markTeacherMessagesRead?.(studentId).catch(() => {});
     });
   }
 
@@ -3351,16 +3353,25 @@ function wireMessagesView(deps, studentId, currentUserId) {
     if (!text) return;
     if (sendBtn) sendBtn.disabled = true;
     try {
+      const selectedEmail = teacherSelect?.value || conversation?.teacherEmail || "";
+      const selected = teachers.find((item) => item.email === selectedEmail);
+      if (!selectedEmail) throw new Error("Elige primero el docente que recibirá el mensaje.");
+      if (selectedEmail !== conversation?.teacherEmail) {
+        conversation = await api.assignMessageTeacher(studentId, selected, ctx.student || {});
+      }
       if (typeof api.sendStudentMessage === "function") {
         await api.sendStudentMessage(studentId, {
           text: text.slice(0, 800),
           senderRole: "student",
           senderName: uiSafeText(ctx.user?.displayName || ctx.user?.email || "Estudiante"),
+          senderEmail: uiSafeText(ctx.user?.email || ""),
+          teacherEmail: selectedEmail,
         });
       }
       if (inputEl) inputEl.value = "";
     } catch (err) {
       console.error("[messages] Error enviando:", err);
+      window.alert(err?.message || "No se pudo enviar el mensaje.");
     } finally {
       if (sendBtn) sendBtn.disabled = false;
     }
@@ -3379,6 +3390,10 @@ async function renderMessages(deps) {
   const userId    = uiSafeText(ctx.user?.uid || ctx.user?.email || "");
 
   let messages = [];
+  const [conversation, teachers] = await Promise.all([
+    api.getMessageConversation?.(studentId).catch(() => null),
+    api.listMessageTeachers?.().catch(() => []),
+  ]);
   if (typeof api.listMessages === "function") {
     messages = await api.listMessages(studentId, 60).catch(() => []);
   }
@@ -3390,9 +3405,17 @@ async function renderMessages(deps) {
 
     ${stack(`
       ${card({
-        title: "Chat con tu docente",
+        title: conversation?.studentUnread ? "Chat con tu docente · Mensaje nuevo" : "Chat con tu docente",
         subtitle: "Mensajes y comunicados de tu proceso.",
         bodyHTML: `
+          <label class="field" style="display:block;margin-bottom:14px">
+            <span style="display:block;font-weight:700;margin-bottom:6px">Docente destinatario</span>
+            <select class="chat-input" id="chatTeacher" aria-label="Docente destinatario">
+              <option value="">Elige un docente…</option>
+              ${teachers.map((teacher) => `<option value="${escapeHtml(teacher.email)}" ${conversation?.teacherEmail === teacher.email ? "selected" : ""}>${escapeHtml(teacher.name)}</option>`).join("")}
+            </select>
+            <small class="note">Solo este docente, tú y los administradores podrán ver la conversación.</small>
+          </label>
           <div class="chat-thread" id="chatThread" aria-live="polite" aria-label="Hilo de mensajes">
             ${threadHTML || `<p class="note" style="text-align:center;padding:24px 0;">Aún no hay mensajes. Cuando tu docente te escriba, aparecerán aquí.</p>`}
           </div>
@@ -3416,7 +3439,7 @@ async function renderMessages(deps) {
     `)}
   `;
 
-  return { html, afterRender: () => wireMessagesView(deps, studentId, userId) };
+  return { html, afterRender: () => wireMessagesView(deps, studentId, userId, conversation, teachers) };
 }
 
 /* =============================================================================

@@ -100,6 +100,18 @@ function initLibraryApp() {
 export const libraryApp = initLibraryApp();
 export const libraryDb = getFirestore(libraryApp);
 
+const TEACHERS_HUB_CONFIG = {
+  apiKey: "AIzaSyC06dLl2Lig3-kD4OVmh4C9LpFW9AeTyOc",
+  authDomain: "musicala-docentes-hub.firebaseapp.com",
+  projectId: "musicala-docentes-hub",
+  storageBucket: "musicala-docentes-hub.firebasestorage.app",
+  messagingSenderId: "936379833270",
+  appId: "1:936379833270:web:512519cf318c919e3abf17"
+};
+const teachersHubApp = getApps().find((item) => item.name === "docentes-directorio")
+  || initializeApp(TEACHERS_HUB_CONFIG, "docentes-directorio");
+export const teachersHubDb = getFirestore(teachersHubApp);
+
 export function getLibraryDb() {
   return libraryDb;
 }

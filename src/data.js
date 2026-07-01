@@ -42,7 +42,7 @@ import {
   deleteObject,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 
-import { db, storage, libraryDb } from "./firebase.js";
+import { db, storage, libraryDb, teachersHubDb } from "./firebase.js";
 
 import {
   COLLECTIONS,
@@ -3294,10 +3294,55 @@ function normalizeMessage(raw = null) {
     text:        safeText(raw.text || raw.mensaje || raw.content || ""),
     senderRole:  safeText(raw.senderRole || raw.rol || "student"),
     senderName:  safeText(raw.senderName || raw.nombre || ""),
+    senderEmail: safeText(raw.senderEmail || ""),
+    teacherEmail: safeText(raw.teacherEmail || ""),
     read:        Boolean(raw.read),
     createdAt:   raw.createdAt || null,
     _createdAt:  toDateMaybe(raw.createdAt),
   };
+}
+
+const FALLBACK_TEACHERS = Object.freeze([
+  { email: "alekcaballeromusic@gmail.com", name: "Alek Caballero" },
+  { email: "catalina.medina.leal@gmail.com", name: "Catalina Medina" },
+  { email: "emilybg0102@gmail.com", name: "Emily Bejarano" },
+  { email: "annitolad@gmail.com", name: "Angie Nitola" },
+  { email: "lorenaduarte.404@gmail.com", name: "Laura Sánchez" },
+  { email: "malego2709@gmail.com", name: "María Alejandra Gómez" },
+  { email: "tiritiri.riri@gmail.com", name: "Isabel Gómez Gómez" },
+  { email: "darasaxcifuentes@gmail.com", name: "Dara Natalia Cifuentes Rojas" },
+]);
+
+export async function listMessageTeachers() {
+  try {
+    const snap = await getDocs(query(collection(teachersHubDb, "teacherDirectory"), orderBy("name", "asc")));
+    const rows = docsToObjects(snap)
+      .filter((item) => item.enabled !== false && safeText(item.email))
+      .map((item) => ({ email: safeText(item.email).toLowerCase(), name: safeText(item.name || item.label || item.email) }));
+    return rows.length ? rows : [...FALLBACK_TEACHERS];
+  } catch (_) {
+    return [...FALLBACK_TEACHERS];
+  }
+}
+
+export async function getMessageConversation(studentId) {
+  const snap = await getDoc(doc(db, COLLECTIONS.studentMessages, safeText(studentId)));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+export async function assignMessageTeacher(studentId, teacher = {}, student = {}) {
+  const id = safeText(studentId);
+  const teacherEmail = safeText(teacher.email).toLowerCase();
+  assertNonEmptyString(id, "studentId");
+  assertNonEmptyString(teacherEmail, "teacherEmail");
+  await setDoc(doc(db, COLLECTIONS.studentMessages, id), removeUndefinedFields({
+    studentId: id,
+    studentName: safeText(student.name || student.nombre || "Estudiante"),
+    teacherEmail,
+    teacherName: safeText(teacher.name || teacher.label || teacherEmail),
+    updatedAt: serverTimestamp(),
+  }), { merge: true });
+  return getMessageConversation(id);
 }
 
 export async function listMessages(studentId, max = 60) {
@@ -3306,6 +3351,9 @@ export async function listMessages(studentId, max = 60) {
     assertNonEmptyString(id, "studentId");
 
     const messagesRef = collection(db, COLLECTIONS.studentMessages, id, "messages");
+    const conversation = await getMessageConversation(id);
+    const teacherEmail = safeText(payload.teacherEmail || conversation?.teacherEmail).toLowerCase();
+    if (!teacherEmail) throw new Error("Primero elige el docente que recibirá el mensaje.");
 
     const q = query(messagesRef, orderBy("createdAt", "asc"), limit(clampLimit(max, 60, 200)));
     const snap = await getDocs(q);
@@ -3333,16 +3381,36 @@ export async function sendStudentMessage(studentId, payload = {}) {
       text,
       senderRole:  safeText(payload.senderRole || "student"),
       senderName:  safeText(payload.senderName || ""),
+      senderEmail: safeText(payload.senderEmail || "").toLowerCase(),
+      teacherEmail,
       read:        false,
       createdAt:   serverTimestamp(),
     });
 
     const docRef = await addDoc(messagesRef, msgData);
+    await setDoc(doc(db, COLLECTIONS.studentMessages, id), {
+      studentId: id,
+      teacherEmail,
+      lastMessage: text.slice(0, 160),
+      lastSenderRole: "student",
+      teacherUnread: true,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
 
     return normalizeMessage({ id: docRef.id, ...msgData });
   } catch (error) {
     throw withContextError(error, "sendStudentMessage");
   }
+}
+
+export async function markTeacherMessagesRead(studentId) {
+  const snap = await getDocs(query(
+    collection(db, COLLECTIONS.studentMessages, safeText(studentId), "messages"),
+    where("senderRole", "==", "teacher"),
+    where("read", "==", false)
+  ));
+  await Promise.all(snap.docs.map((item) => updateDoc(item.ref, { read: true })));
+  await setDoc(doc(db, COLLECTIONS.studentMessages, safeText(studentId)), { studentUnread: false }, { merge: true });
 }
 
 export function subscribeMessages(studentId, callback) {
