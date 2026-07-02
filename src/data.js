@@ -328,6 +328,7 @@ export function normalizeAccessProfile(raw = null) {
     ...safeArray(raw.students),
     raw.studentId,
     raw.studentKey,
+    raw.estudianteId,
   ].map((id) => safeText(id)));
 
   return {
@@ -915,13 +916,17 @@ export async function addStudentEmailAccess(studentId, email, meta = {}) {
     const ref = doc(db, COLLECTIONS.users, cleanEmail);
     const snap = await getDoc(ref);
     const existing = snap.exists() ? snap.data() || {} : {};
+    const student = await getStudent(id).catch(() => null);
+    const aliasIds = buildStudentAliasIds(student, id);
 
     const mergedStudentIds = unique(
       [
         ...safeArray(existing.studentIds),
         ...safeArray(existing.students),
         safeText(existing.studentId),
-        id,
+        safeText(existing.studentKey),
+        safeText(existing.estudianteId),
+        ...aliasIds,
       ].map((value) => safeText(value))
     );
 
@@ -950,6 +955,65 @@ export async function addStudentEmailAccess(studentId, email, meta = {}) {
     return { email: cleanEmail, role, studentIds: mergedStudentIds };
   } catch (error) {
     throw withContextError(error, "addStudentEmailAccess");
+  }
+}
+
+/*
+  Repara accesos creados antes de que el HUB conociera todas las llaves del
+  estudiante. Conserva los vínculos actuales y agrega los alias que Bitácoras
+  puede haber usado (id, studentId, studentKey, documento y duplicados).
+*/
+export async function repairStudentEmailAccess(studentId) {
+  try {
+    const id = safeText(studentId);
+    assertNonEmptyString(id, "studentId");
+
+    const student = await getStudent(id).catch(() => null);
+    const aliasIds = buildStudentAliasIds(student, id);
+    const accessRows = await listStudentEmailAccess(id);
+    let repaired = 0;
+
+    for (const access of accessRows) {
+      const email = normalizeEmail(access?.email);
+      if (!email) continue;
+
+      const currentIds = unique(
+        [
+          ...safeArray(access.studentIds),
+          ...safeArray(access.students),
+          safeText(access.studentId),
+          safeText(access.studentKey),
+          safeText(access.estudianteId),
+        ].map((value) => safeText(value))
+      );
+      const mergedIds = unique([...currentIds, ...aliasIds]);
+
+      if (
+        mergedIds.length === currentIds.length &&
+        access.active !== false
+      ) {
+        continue;
+      }
+
+      await setDoc(
+        doc(db, COLLECTIONS.users, email),
+        {
+          email,
+          active: true,
+          studentIds: mergedIds,
+          students: mergedIds,
+          studentId: safeText(access.studentId) || mergedIds[0] || "",
+          repairedFromHub: true,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      repaired += 1;
+    }
+
+    return { repaired, aliases: aliasIds, accessCount: accessRows.length };
+  } catch (error) {
+    throw withContextError(error, "repairStudentEmailAccess");
   }
 }
 

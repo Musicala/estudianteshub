@@ -909,6 +909,11 @@ async function renderProfile(deps) {
     let emails = [];
 
     if (studentId && typeof api.listStudentEmailAccess === "function") {
+      if (typeof api.repairStudentEmailAccess === "function") {
+        await api.repairStudentEmailAccess(studentId).catch((error) => {
+          console.warn("[views] No se pudieron reparar todos los accesos del proceso.", error);
+        });
+      }
       emails = await api.listStudentEmailAccess(studentId).catch(() => []);
     }
 
