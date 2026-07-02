@@ -3332,7 +3332,7 @@ function wireMessagesView(deps, studentId, currentUserId, conversation, teachers
   const sendBtn   = document.getElementById("chatSend");
   const teacherSelect = document.getElementById("chatTeacher");
 
-  const EMPTY_MSG = `<p class="note" style="text-align:center;padding:24px 0;">Aún no hay mensajes. Cuando tu docente te escriba, aparecerán aquí.</p>`;
+  const EMPTY_MSG = `<p class="note" style="text-align:center;padding:24px 0;"><strong>Elige a tu docente y empieza a comunicarte.</strong><br>Este espacio está listo para tus preguntas académicas sobre clases, ejercicios y tareas.</p>`;
 
   // Real-time subscription
   if (typeof api.subscribeMessages === "function") {
@@ -3417,7 +3417,7 @@ async function renderMessages(deps) {
             <small class="note">Solo este docente, tú y los administradores podrán ver la conversación.</small>
           </label>
           <div class="chat-thread" id="chatThread" aria-live="polite" aria-label="Hilo de mensajes">
-            ${threadHTML || `<p class="note" style="text-align:center;padding:24px 0;">Aún no hay mensajes. Cuando tu docente te escriba, aparecerán aquí.</p>`}
+            ${threadHTML || `<p class="note" style="text-align:center;padding:24px 0;"><strong>Elige a tu docente y empieza a comunicarte.</strong><br>Este espacio está listo para tus preguntas académicas sobre clases, ejercicios y tareas.</p>`}
           </div>
           <div class="chat-composer" id="chatComposer">
             <textarea
