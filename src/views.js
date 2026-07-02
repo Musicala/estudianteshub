@@ -150,6 +150,9 @@ function isTechnicalKey(value = "") {
   const text = String(value || "").trim();
   if (!text) return false;
 
+  // Objetos serializados por accidente: jamás se muestran al estudiante.
+  if (text.includes("[object")) return true;
+
   // Prefijos internos conocidos.
   if (/^(proc|process|proceso|fallback|fb|ruta|route|doc|id)[_-]/i.test(text)) {
     return true;
@@ -221,14 +224,31 @@ function getBitacoraTitle(bitacora = {}) {
 }
 
 function getProcessLabel(item = {}) {
+  // El proceso puede venir como texto o como objeto según la fuente del dato.
+  const asLabel = (value) => {
+    if (!value) return "";
+    if (typeof value === "object") {
+      return (
+        value.processLabel ||
+        value.label ||
+        value.name ||
+        value.nombre ||
+        value.programa ||
+        value.program ||
+        value.area ||
+        value.instrumento ||
+        value.instrument ||
+        ""
+      );
+    }
+    return value;
+  };
+
   return humanLabel(
-    item.process?.processLabel ||
-      item.process?.label ||
-      item.process?.programa ||
-      item.process?.area ||
-      item.processLabel ||
-      item.proceso ||
-      item.program ||
+    asLabel(item.process) ||
+      asLabel(item.processLabel) ||
+      asLabel(item.proceso) ||
+      asLabel(item.program) ||
       "",
     ""
   );
@@ -1434,15 +1454,20 @@ async function renderJournal(deps) {
 
   let rows = [];
 
+  const logJournalError = (error) => {
+    console.warn("[views] No se pudieron cargar las bitácoras:", error);
+    return [];
+  };
+
   if (typeof api.listBitacorasByStudent === "function") {
-    rows = await api.listBitacorasByStudent(studentId, { max: 80 }).catch(() => []);
+    rows = await api.listBitacorasByStudent(studentId, { max: 80 }).catch(logJournalError);
 
     const fallbackId = getStudentFallbackQueryId(ctx);
     if (!rows.length && fallbackId && fallbackId !== studentId) {
-      rows = await api.listBitacorasByStudent(fallbackId, { max: 80 }).catch(() => []);
+      rows = await api.listBitacorasByStudent(fallbackId, { max: 80 }).catch(logJournalError);
     }
   } else if (typeof api.listJournal === "function") {
-    rows = await api.listJournal(studentId, 80).catch(() => []);
+    rows = await api.listJournal(studentId, 80).catch(logJournalError);
   }
 
   const bitacoras = normalizeBitacoras(rows);
@@ -1465,7 +1490,7 @@ async function renderJournal(deps) {
   const byProcess = new Map();
 
   for (const item of bitacoras) {
-    const process = uiSafeText(item.process || item.proceso || "General", "General");
+    const process = getProcessLabel(item) || "General";
 
     byProcess.set(process, (byProcess.get(process) || 0) + 1);
   }

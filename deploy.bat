@@ -31,10 +31,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM --- 2) Desplegar a Firebase Hosting ---
+REM --- 2) Desplegar a Firebase Hosting + reglas de Firestore ---
 echo.
-echo Desplegando a Firebase Hosting...
-call firebase deploy --only hosting:estudianteshub --project bitacoras-de-clase
+echo Desplegando a Firebase Hosting y reglas de Firestore...
+call firebase deploy --only hosting:estudianteshub,firestore:rules --project bitacoras-de-clase
 if errorlevel 1 (
   echo.
   echo ERROR en el deploy de Firebase. Revisa el mensaje de arriba.

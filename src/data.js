@@ -387,6 +387,43 @@ function resolveBitacoraDate(raw = {}) {
   return null;
 }
 
+/*
+  El proceso puede llegar como texto o como objeto (según el editor que creó
+  la bitácora). La UI solo necesita una etiqueta legible; nunca debe terminar
+  pintando "[object Object]".
+*/
+function resolveBitacoraProcessLabel(raw = {}) {
+  const candidates = [raw.process, raw.proceso, raw.program, raw.programa];
+
+  for (const value of candidates) {
+    if (!value) continue;
+
+    if (typeof value === "string") {
+      const text = safeText(value);
+      if (text) return text;
+      continue;
+    }
+
+    if (typeof value === "object") {
+      const label = safeText(
+        value.processLabel ||
+          value.label ||
+          value.name ||
+          value.nombre ||
+          value.programa ||
+          value.program ||
+          value.area ||
+          value.instrumento ||
+          value.instrument ||
+          ""
+      );
+      if (label) return label;
+    }
+  }
+
+  return "";
+}
+
 export function normalizeBitacora(raw = null) {
   if (!raw) return null;
 
@@ -440,8 +477,9 @@ export function normalizeBitacora(raw = null) {
     fechaClase,
     date: raw.date || fechaClase,
 
-    process: raw.process || raw.proceso || raw.program || "",
-    proceso: raw.proceso || raw.process || raw.program || "",
+    process: resolveBitacoraProcessLabel(raw),
+    proceso: resolveBitacoraProcessLabel(raw),
+    processLabel: resolveBitacoraProcessLabel(raw) || safeText(raw.processLabel),
 
     tags: safeArray(raw.tags || raw.etiquetas),
     attachments: safeArray(raw.attachments || raw.adjuntos || raw.files),
@@ -1219,18 +1257,72 @@ export async function listBitacorasByStudent(studentId, options = {}) {
 
       Consultamos por TODAS las llaves del estudiante con array-contains-any
       (máx. 10 por consulta), y unimos resultados sin duplicar.
+
+      OJO con cuentas de estudiante/acudiente: las reglas de Firestore no
+      filtran documentos, validan la consulta completa. Si UNO solo de los
+      alias no está vinculado en users/{email}, el array-contains-any entero
+      se rechaza con permission-denied. Por eso, cuando la consulta agrupada
+      falla por permisos, degradamos a consultas individuales por alias: las
+      llaves que sí están en el perfil pasan y las demás se ignoran.
     */
     const byDocId = new Map();
 
-    for (const part of chunk(aliasIds, MAX_IN)) {
-      if (!part.length) continue;
-      const q = query(
-        bitacorasRef,
-        where("studentIds", "array-contains-any", part)
-      );
-      const snap = await getDocs(q);
+    const collectDocs = (snap) => {
       for (const docItem of snap.docs) {
         byDocId.set(docItem.id, normalizeDocBase(docItem.id, docItem.data() || {}));
+      }
+    };
+
+    const isPermissionDenied = (error) =>
+      String(error?.code || "").includes("permission-denied");
+
+    let deniedGrouped = false;
+
+    for (const part of chunk(aliasIds, MAX_IN)) {
+      if (!part.length) continue;
+      try {
+        const snap = await getDocs(
+          query(bitacorasRef, where("studentIds", "array-contains-any", part))
+        );
+        collectDocs(snap);
+      } catch (error) {
+        if (!isPermissionDenied(error)) throw error;
+        deniedGrouped = true;
+      }
+    }
+
+    if (deniedGrouped) {
+      console.warn(
+        "[data] listBitacorasByStudent: consulta agrupada denegada por reglas; reintentando alias por alias."
+      );
+
+      for (const aliasId of aliasIds) {
+        try {
+          const snap = await getDocs(
+            query(bitacorasRef, where("studentIds", "array-contains", aliasId))
+          );
+          collectDocs(snap);
+        } catch (error) {
+          if (!isPermissionDenied(error)) throw error;
+          // Alias no vinculado al perfil: se ignora sin romper el resultado.
+        }
+      }
+    }
+
+    /*
+      Bitácoras antiguas pueden tener solo studentId (texto) y no la lista
+      studentIds. Si aún no hay resultados, probamos igualdad por alias.
+    */
+    if (!byDocId.size) {
+      for (const aliasId of aliasIds) {
+        try {
+          const snap = await getDocs(
+            query(bitacorasRef, where("studentId", "==", aliasId))
+          );
+          collectDocs(snap);
+        } catch (error) {
+          if (!isPermissionDenied(error)) throw error;
+        }
       }
     }
 
@@ -3042,7 +3134,10 @@ export async function getStudentPortalHome(studentId, options = {}) {
         }
 
         return getRecentBitacoras(fallbackStudentId);
-      }).catch(() => []),
+      }).catch((error) => {
+        console.warn("[data] getStudentPortalHome: bitácoras no disponibles.", error);
+        return [];
+      }),
       getHomeResources(student).catch(() => []),
       getHomeEvents().catch(() => []),
     ]);
@@ -3088,7 +3183,10 @@ export async function getFullStudentPortalBundle(studentId) {
       listBitacorasByStudent(id, {
         max: LIMITS?.maxBitacorasPage || 30,
         student,
-      }).catch(() => []),
+      }).catch((error) => {
+        console.warn("[data] getFullStudentPortalBundle: bitácoras no disponibles.", error);
+        return [];
+      }),
       listResources({ student }).catch(() => []),
       listEvents().catch(() => []),
       getCatalogs().catch(() => null),

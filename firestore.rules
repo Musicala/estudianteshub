@@ -109,8 +109,12 @@ service cloud.firestore {
 
     function studentOwnsBitacora() {
       return isActiveStudent() &&
-        resource.data.studentIds is list &&
-        resource.data.studentIds.hasAny(linkedStudentIds());
+        (
+          (resource.data.studentIds is list &&
+            resource.data.studentIds.hasAny(linkedStudentIds())) ||
+          (resource.data.studentId is string &&
+            resource.data.studentId in linkedStudentIds())
+        );
     }
 
     function studentOwnsStudentDoc() {
