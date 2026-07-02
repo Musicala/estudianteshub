@@ -916,7 +916,10 @@ export async function addStudentEmailAccess(studentId, email, meta = {}) {
     const ref = doc(db, COLLECTIONS.users, cleanEmail);
     const snap = await getDoc(ref);
     const existing = snap.exists() ? snap.data() || {} : {};
-    const student = await getStudent(id).catch(() => null);
+    const student =
+      meta.student && typeof meta.student === "object"
+        ? meta.student
+        : await getStudent(id).catch(() => null);
     const aliasIds = buildStudentAliasIds(student, id);
 
     const mergedStudentIds = unique(
@@ -963,12 +966,15 @@ export async function addStudentEmailAccess(studentId, email, meta = {}) {
   estudiante. Conserva los vínculos actuales y agrega los alias que Bitácoras
   puede haber usado (id, studentId, studentKey, documento y duplicados).
 */
-export async function repairStudentEmailAccess(studentId) {
+export async function repairStudentEmailAccess(studentId, options = {}) {
   try {
     const id = safeText(studentId);
     assertNonEmptyString(id, "studentId");
 
-    const student = await getStudent(id).catch(() => null);
+    const student =
+      options.student && typeof options.student === "object"
+        ? options.student
+        : await getStudent(id).catch(() => null);
     const aliasIds = buildStudentAliasIds(student, id);
     const accessRows = await listStudentEmailAccess(id);
     let repaired = 0;

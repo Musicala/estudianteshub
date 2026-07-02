@@ -1292,6 +1292,7 @@ async function handleAddStudentEmail() {
   try {
     await api.addStudentEmailAccess(studentId, email, {
       actorEmail: state.user?.email || "",
+      student: state.student || null,
     });
     toast("Correo agregado al proceso.", "success");
     await navigate({ force: true });

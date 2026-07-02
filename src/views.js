@@ -910,7 +910,7 @@ async function renderProfile(deps) {
 
     if (studentId && typeof api.listStudentEmailAccess === "function") {
       if (typeof api.repairStudentEmailAccess === "function") {
-        await api.repairStudentEmailAccess(studentId).catch((error) => {
+        await api.repairStudentEmailAccess(studentId, { student }).catch((error) => {
           console.warn("[views] No se pudieron reparar todos los accesos del proceso.", error);
         });
       }
