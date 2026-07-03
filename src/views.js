@@ -844,11 +844,11 @@ function renderEmailAccessCard(emails = [], studentId = "", audit = null) {
           const inactive = entry?.active === false;
           const check = auditByEmail.get(email.toLowerCase());
           const badge = check?.ok
-            ? `<span class="login-badge login-badge--ok">✓ acceso completo</span>`
+            ? `<span class="login-badge login-badge--ok">✓ vínculos correctos</span>`
             : `<span class="login-badge login-badge--no">⛔ revisar acceso</span>`;
           const checkDetail = check
             ? check.ok
-              ? `${check.visibleBitacoras} de ${check.totalBitacoras} bitácoras verificadas`
+              ? `${check.visibleBitacoras} bitácoras asociadas · falta confirmar desde esa cuenta`
               : check.issues.join(" · ")
             : "No se pudo ejecutar la verificación";
 
@@ -1480,20 +1480,32 @@ async function renderJournal(deps) {
   const ctx = getCtx(deps);
   const api = getApi(deps);
   const studentId = getStudentId(ctx);
+  const authorizedAliasIds = safeArray(ctx.studentIds);
+  const student = getStudent(ctx);
 
   let rows = [];
+  let journalError = null;
 
   const logJournalError = (error) => {
+    journalError = error;
     console.warn("[views] No se pudieron cargar las bitácoras:", error);
     return [];
   };
 
   if (typeof api.listBitacorasByStudent === "function") {
-    rows = await api.listBitacorasByStudent(studentId, { max: 80 }).catch(logJournalError);
+    rows = await api.listBitacorasByStudent(studentId, {
+      max: 80,
+      student,
+      aliasIds: authorizedAliasIds,
+    }).catch(logJournalError);
 
     const fallbackId = getStudentFallbackQueryId(ctx);
     if (!rows.length && fallbackId && fallbackId !== studentId) {
-      rows = await api.listBitacorasByStudent(fallbackId, { max: 80 }).catch(logJournalError);
+      rows = await api.listBitacorasByStudent(fallbackId, {
+        max: 80,
+        student,
+        aliasIds: authorizedAliasIds,
+      }).catch(logJournalError);
     }
   } else if (typeof api.listJournal === "function") {
     rows = await api.listJournal(studentId, 80).catch(logJournalError);
@@ -1502,6 +1514,9 @@ async function renderJournal(deps) {
   const bitacoras = normalizeBitacoras(rows);
 
   if (!bitacoras.length) {
+    const emptyMessage = journalError
+      ? "No pudimos consultar tus bitácoras por un problema de permisos. Informa al equipo Musicala para revisar tu acceso."
+      : "Cuando tus docentes registren lo trabajado en clase, aparecerá aquí.";
     return `
       ${viewHeader("Bitácora", studentSubtitle(ctx), {
         eyebrow: "Seguimiento de clases",
@@ -1509,7 +1524,7 @@ async function renderJournal(deps) {
 
       ${emptyState(
         "Aún no hay bitácoras",
-        "Cuando tus docentes registren lo trabajado en clase, aparecerá aquí.",
+        emptyMessage,
         { icon: "✎" }
       )}
     `;

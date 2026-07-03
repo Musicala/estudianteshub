@@ -1374,10 +1374,6 @@ function buildStudentAliasIds(student = null, baseId = "") {
   trae el objeto estudiante (caso de los bundles), no hacemos lecturas extra.
 */
 async function resolveStudentAliasIds(idOrIds, options = {}) {
-  if (Array.isArray(options.aliasIds) && options.aliasIds.length) {
-    return unique(options.aliasIds.map((value) => safeText(value)));
-  }
-
   const baseId = safeText(idOrIds);
 
   let student =
@@ -1387,7 +1383,10 @@ async function resolveStudentAliasIds(idOrIds, options = {}) {
     student = await getStudent(baseId).catch(() => null);
   }
 
-  const aliases = buildStudentAliasIds(student, baseId);
+  const aliases = unique([
+    ...safeArray(options.aliasIds).map((value) => safeText(value)),
+    ...buildStudentAliasIds(student, baseId),
+  ]);
 
   return aliases.length ? aliases : [baseId].filter(Boolean);
 }
@@ -1459,6 +1458,22 @@ export async function listBitacorasByStudent(studentId, options = {}) {
         } catch (error) {
           if (!isPermissionDenied(error)) throw error;
           // Alias no vinculado al perfil: se ignora sin romper el resultado.
+        }
+      }
+    }
+
+    // Algunas sesiones autorizadas pueden recibir cero resultados en la
+    // consulta agrupada aunque una llave individual sí coincida. Verificamos
+    // alias por alias antes de concluir que el estudiante no tiene bitácoras.
+    if (!byDocId.size && !deniedGrouped) {
+      for (const aliasId of aliasIds) {
+        try {
+          const snap = await getDocs(
+            query(bitacorasRef, where("studentIds", "array-contains", aliasId))
+          );
+          collectDocs(snap);
+        } catch (error) {
+          if (!isPermissionDenied(error)) throw error;
         }
       }
     }
