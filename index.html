@@ -441,10 +441,12 @@
     aria-atomic="true"
   ></div>
 
-  <script type="module" src="./src/app.js?v=2026-07-01.7"></script>
+  <script type="module" src="./src/app.js?v=2026-07-02.11"></script>
 
   <script>
     (() => {
+      const FORCE_REFRESH_VERSION = '2026-07-02.11';
+      const FORCE_REFRESH_KEY = 'estudiantes-hub-force-refresh';
       const canUseServiceWorker =
         'serviceWorker' in navigator &&
         (location.protocol === 'https:' || location.hostname === 'localhost');
@@ -460,12 +462,35 @@
         window.location.reload();
       });
 
-      window.addEventListener('load', () => {
+      window.addEventListener('load', async () => {
+        /*
+          Corte de caché para instalaciones antiguas:
+          se ejecuta una sola vez por versión, elimina Service Workers/cachés
+          heredados y recarga con una URL irrepetible. Firebase Auth permanece
+          intacto porque no se borra IndexedDB ni localStorage.
+        */
+        if (localStorage.getItem(FORCE_REFRESH_KEY) !== FORCE_REFRESH_VERSION) {
+          localStorage.setItem(FORCE_REFRESH_KEY, FORCE_REFRESH_VERSION);
+
+          const registrations = await navigator.serviceWorker.getRegistrations().catch(() => []);
+          await Promise.all(registrations.map((item) => item.unregister().catch(() => false)));
+
+          if ('caches' in window) {
+            const cacheNames = await caches.keys().catch(() => []);
+            await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+          }
+
+          const refreshUrl = new URL(window.location.href);
+          refreshUrl.searchParams.set('app_version', FORCE_REFRESH_VERSION);
+          window.location.replace(refreshUrl.toString());
+          return;
+        }
+
         // updateViaCache:'none' es CLAVE: obliga al navegador a pedir SIEMPRE el
         // sw.js fresco a la red (sin usar su caché HTTP). Sin esto, iPhone/Android
         // pueden quedarse con un Service Worker viejo que nunca se actualiza, y por
         // eso a los estudiantes les seguía apareciendo una versión anterior.
-        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((registration) => {
+        navigator.serviceWorker.register(`./sw.js?v=${FORCE_REFRESH_VERSION}`, { updateViaCache: 'none' }).then((registration) => {
           // Si encontramos una versión nueva, la activamos de inmediato.
           function promoteWaitingWorker() {
             const worker = registration.installing || registration.waiting;
