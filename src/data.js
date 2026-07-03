@@ -2659,6 +2659,11 @@ const CLEAN_GENERAL_ESPECIALIDADES = new Set([
   (entonces se usa la heurística legacy de abajo).
 */
 function cleanResourceMatch(resource, student) {
+  // Candado de público: si el recurso declara para quién es y no incluye
+  // estudiantes (p. ej. material institucional de docentes), nunca se muestra.
+  const publico = safeArray(resource.publico).map(normalizeResourceText);
+  if (publico.length && !publico.includes("estudiantes")) return false;
+
   const disciplina = normalizeResourceText(resource.disciplina);
   if (!disciplina) return null; // recurso sin clasificar -> heurística legacy
 
