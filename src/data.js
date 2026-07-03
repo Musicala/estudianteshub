@@ -1023,6 +1023,90 @@ export async function repairStudentEmailAccess(studentId, options = {}) {
   }
 }
 
+export async function auditStudentEmailAccess(studentId, options = {}) {
+  try {
+    const id = safeText(studentId);
+    assertNonEmptyString(id, "studentId");
+
+    const student =
+      options.student && typeof options.student === "object"
+        ? options.student
+        : await getStudent(id).catch(() => null);
+    const aliasIds = buildStudentAliasIds(student, id);
+    const requiredIds = new Set(aliasIds);
+    const accessRows = await listStudentEmailAccess(id);
+    const bitacoras = await listBitacorasByStudent(id, {
+      student,
+      aliasIds,
+      max: 200,
+    });
+    const allowedRoles = new Set(LINKED_ACCESS_ROLES);
+    const rows = [];
+
+    for (const listed of accessRows) {
+      const email = normalizeEmail(listed?.email);
+      if (!email) continue;
+
+      const canonicalSnap = await getDoc(doc(db, COLLECTIONS.users, email));
+      const canonical = canonicalSnap.exists() ? canonicalSnap.data() || {} : null;
+      const role = safeText(canonical?.role || canonical?.rol || listed.role).toLowerCase();
+      const active =
+        canonical !== null &&
+        canonical.active !== false &&
+        canonical.estado !== "inactivo";
+      const linkedIds = unique(
+        [
+          ...safeArray(canonical?.studentIds),
+          ...safeArray(canonical?.students),
+          canonical?.studentId,
+          canonical?.studentKey,
+          canonical?.estudianteId,
+        ].map((value) => safeText(value))
+      );
+      const linkedSet = new Set(linkedIds);
+      const missingIds = [...requiredIds].filter((aliasId) => !linkedSet.has(aliasId));
+      const visibleBitacoras = bitacoras.filter((item) => {
+        const itemIds = unique(
+          [
+            ...safeArray(item.studentIds),
+            item.studentId,
+            item.studentKey,
+            item.estudianteId,
+          ].map((value) => safeText(value))
+        );
+        return itemIds.some((itemId) => linkedSet.has(itemId));
+      }).length;
+      const issues = [];
+
+      if (!canonical) issues.push("Falta users/{correo}");
+      if (!active) issues.push("Acceso inactivo");
+      if (!allowedRoles.has(role)) issues.push("Rol no permitido");
+      if (missingIds.length) issues.push(`${missingIds.length} identificador(es) sin vincular`);
+      if (visibleBitacoras < bitacoras.length) {
+        issues.push(`${bitacoras.length - visibleBitacoras} bitácora(s) no visibles`);
+      }
+
+      rows.push({
+        email,
+        role: role || "(sin rol)",
+        active,
+        visibleBitacoras,
+        totalBitacoras: bitacoras.length,
+        ok: issues.length === 0,
+        issues,
+      });
+    }
+
+    return {
+      ok: rows.length > 0 && rows.every((row) => row.ok),
+      totalBitacoras: bitacoras.length,
+      rows,
+    };
+  } catch (error) {
+    throw withContextError(error, "auditStudentEmailAccess");
+  }
+}
+
 export async function removeStudentEmailAccess(email, studentId) {
   try {
     const cleanEmail = normalizeEmail(email);

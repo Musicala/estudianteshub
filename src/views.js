@@ -829,8 +829,11 @@ async function renderHome(deps) {
   Profile
 ============================================================================= */
 
-function renderEmailAccessCard(emails = [], studentId = "") {
+function renderEmailAccessCard(emails = [], studentId = "", audit = null) {
   const list = safeArray(emails);
+  const auditByEmail = new Map(
+    safeArray(audit?.rows).map((row) => [uiSafeText(row?.email).toLowerCase(), row])
+  );
 
   const itemsHTML = list.length
     ? list
@@ -839,12 +842,26 @@ function renderEmailAccessCard(emails = [], studentId = "") {
           if (!email) return "";
           const role = uiSafeText(entry?.role || "acudiente");
           const inactive = entry?.active === false;
+          const check = auditByEmail.get(email.toLowerCase());
+          const badge = check?.ok
+            ? `<span class="login-badge login-badge--ok">✓ acceso completo</span>`
+            : `<span class="login-badge login-badge--no">⛔ revisar acceso</span>`;
+          const checkDetail = check
+            ? check.ok
+              ? `${check.visibleBitacoras} de ${check.totalBitacoras} bitácoras verificadas`
+              : check.issues.join(" · ")
+            : "No se pudo ejecutar la verificación";
 
           return `
-            <li class="cluster" style="justify-content:space-between;gap:.5rem;align-items:center;">
-              <span>
-                <strong>${escapeHtml(email)}</strong>
-                <span class="note"> · ${escapeHtml(role)}${inactive ? " · inactivo" : ""}</span>
+            <li class="cluster" style="justify-content:space-between;gap:.75rem;align-items:center;">
+              <span style="min-width:0;">
+                <span class="cluster" style="gap:.4rem;align-items:center;">
+                  <strong>${escapeHtml(email)}</strong>
+                  ${badge}
+                </span>
+                <span class="note" style="display:block;margin-top:.2rem;">
+                  ${escapeHtml(role)}${inactive ? " · inactivo" : ""} · ${escapeHtml(checkDetail)}
+                </span>
               </span>
               <button
                 class="btn btn--ghost btn--sm"
@@ -882,7 +899,7 @@ function renderEmailAccessCard(emails = [], studentId = "") {
       </div>
 
       <p class="note" style="margin-top:.5rem;">
-        Los correos iniciales vienen de Bitácoras. Aquí solo se agregan correos extra.
+        Verificación administrativa: perfil, estado, rol, identificadores del proceso y bitácoras visibles.
       </p>
     `,
   });
@@ -907,6 +924,7 @@ async function renderProfile(deps) {
     const api = getApi(deps);
     const studentId = getStudentId(ctx);
     let emails = [];
+    let accessAudit = null;
 
     if (studentId && typeof api.listStudentEmailAccess === "function") {
       if (typeof api.repairStudentEmailAccess === "function") {
@@ -915,9 +933,15 @@ async function renderProfile(deps) {
         });
       }
       emails = await api.listStudentEmailAccess(studentId).catch(() => []);
+      if (typeof api.auditStudentEmailAccess === "function") {
+        accessAudit = await api.auditStudentEmailAccess(studentId, { student }).catch((error) => {
+          console.warn("[views] No se pudo auditar el acceso del proceso.", error);
+          return null;
+        });
+      }
     }
 
-    emailAccessCardHTML = renderEmailAccessCard(emails, studentId);
+    emailAccessCardHTML = renderEmailAccessCard(emails, studentId, accessAudit);
   }
 
   const html = `
