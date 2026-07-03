@@ -13,6 +13,7 @@
       "**/*.md",
       "deploy.bat",
       "firestore.rules",
+      "tests/**",
       ".github/**",
       ".claude/**",
       ".agents/**",

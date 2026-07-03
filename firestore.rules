@@ -22,67 +22,44 @@ service cloud.firestore {
         ];
     }
 
-    function hasAccessProfile() {
-      return authEmail() != "" &&
-        exists(/databases/$(database)/documents/users/$(authEmail()));
-    }
+    /*
+      IMPORTANTE — costo de evaluación:
+      El motor de reglas tiene un límite duro de expresiones por consulta
+      (~1000 en 'list'). Las versiones anteriores de estas funciones usaban
+      ternarios anidados con get()/exists() repetidos y se expandían tanto
+      que el motor abortaba la evaluación y NEGABA TODO a los estudiantes
+      (incidente bitácoras 2026-07-02/03). Por eso aquí se usa UN solo get()
+      del perfil y Map.get() con valores por defecto. Si editas estas
+      funciones, mantenlas baratas.
 
-    function accessProfile() {
-      return get(/databases/$(database)/documents/users/$(authEmail()));
+      Nota: si users/{correo} no existe, get() falla y esa rama simplemente
+      niega (los || absorben el error cuando otra rama concede). Es el mismo
+      resultado que antes: sin perfil no hay acceso de estudiante.
+    */
+    function profileData() {
+      return get(/databases/$(database)/documents/users/$(authEmail())).data;
     }
 
     function accessRole() {
-      return hasAccessProfile() && accessProfile().data.role is string
-        ? accessProfile().data.role
-        : "";
+      return profileData().get('role', '');
     }
 
     function accessIsActive() {
-      return hasAccessProfile()
-        ? accessProfile().data.active != false
-        : false;
-    }
-
-    function linkedStudentId() {
-      return hasAccessProfile() && accessProfile().data.studentId is string
-        ? accessProfile().data.studentId
-        : (
-            hasAccessProfile() && accessProfile().data.studentKey is string
-            ? accessProfile().data.studentKey
-            : (
-                hasAccessProfile() && accessProfile().data.estudianteId is string
-                ? accessProfile().data.estudianteId
-                : ""
-              )
-          );
+      return profileData().get('active', true) != false;
     }
 
     function linkedStudentIds() {
-      return !hasAccessProfile()
-        ? []
-        : (
-            accessProfile().data.studentIds is list
-            ? accessProfile().data.studentIds
-            : (
-                accessProfile().data.students is list
-                ? accessProfile().data.students
-                : (
-                    linkedStudentId() != ""
-                    ? [linkedStudentId()]
-                    : []
-                  )
-              )
-          );
-    }
-
-    function hasCatalogs() {
-      return exists(/databases/$(database)/documents/app_config/catalogos);
+      return profileData().get('studentIds',
+        profileData().get('students',
+          [profileData().get('studentId',
+            profileData().get('studentKey',
+              profileData().get('estudianteId', '')))]));
     }
 
     function teacherEmailList() {
-      return hasCatalogs() &&
-        get(/databases/$(database)/documents/app_config/catalogos).data.teacherAccessEmails is list
-        ? get(/databases/$(database)/documents/app_config/catalogos).data.teacherAccessEmails
+      return exists(/databases/$(database)/documents/app_config/catalogos)
+        ? get(/databases/$(database)/documents/app_config/catalogos)
+            .data.get('teacherAccessEmails', [])
         : [];
     }
 
@@ -96,24 +73,22 @@ service cloud.firestore {
     }
 
     function isActiveStudent() {
-      return (
-          accessRole() == "student" ||
-          accessRole() == "estudiante" ||
-          accessRole() == "acudiente" ||
-          accessRole() == "guardian" ||
-          accessRole() == "parent"
-        ) &&
+      return accessRole() in ["student", "estudiante", "acudiente", "guardian", "parent"] &&
         accessIsActive() &&
         linkedStudentIds().size() > 0;
     }
 
+    /*
+      Sin comprobaciones "is list"/"is string": si el campo no existe, la rama
+      falla sola y el || la absorbe cuando la otra concede. Acceder al campo
+      directo (y no via data.get) es lo que permite al motor PROBAR las
+      consultas array-contains / == de la app.
+    */
     function studentOwnsBitacora() {
       return isActiveStudent() &&
         (
-          (resource.data.studentIds is list &&
-            resource.data.studentIds.hasAny(linkedStudentIds())) ||
-          (resource.data.studentId is string &&
-            resource.data.studentId in linkedStudentIds())
+          resource.data.studentIds.hasAny(linkedStudentIds()) ||
+          resource.data.studentId in linkedStudentIds()
         );
     }
 

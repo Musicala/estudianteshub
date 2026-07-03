@@ -1107,6 +1107,167 @@ export async function auditStudentEmailAccess(studentId, options = {}) {
   }
 }
 
+/*
+  Auditoría GLOBAL de acceso a bitácoras (solo sesión admin).
+
+  Recorre TODOS los perfiles de users/ con rol estudiante/acudiente y calcula,
+  con la MISMA lógica que aplican las reglas de Firestore (studentIds del
+  perfil vs. llaves guardadas en cada bitácora), cuántas bitácoras puede leer
+  realmente esa cuenta. Con repair=true agrega al perfil las llaves que
+  falten, que es la reparación mínima para que todo quede visible.
+
+  Importante: aquí se comparan los CAMPOS CRUDOS del documento (studentIds /
+  studentId / students), que es exactamente lo que evalúan las reglas; no la
+  versión normalizada que usa la UI.
+*/
+export async function auditAllBitacoraAccess(options = {}) {
+  try {
+    const repair = options.repair === true;
+    const allowedRoles = new Set(LINKED_ACCESS_ROLES);
+    const bitacorasRef = collection(db, COLLECTIONS.bitacoras);
+
+    const usersSnap = await getDocs(collection(db, COLLECTIONS.users));
+    const rows = [];
+
+    const auditOne = async (userDoc) => {
+      const data = userDoc.data() || {};
+      const email = normalizeEmail(data.email || data.correo || userDoc.id);
+      const role = safeText(data.role || data.rol).toLowerCase();
+
+      if (!email || !allowedRoles.has(role)) return null;
+
+      const active = data.active !== false && data.estado !== "inactivo";
+
+      /*
+        Llaves vinculadas EXACTAMENTE como las resuelven las reglas
+        (linkedStudentIds): studentIds si es lista; si no, students; si no,
+        la primera llave simple disponible.
+      */
+      const singleId =
+        safeText(data.studentId) ||
+        safeText(data.studentKey) ||
+        safeText(data.estudianteId);
+      const linkedIds = Array.isArray(data.studentIds)
+        ? unique(data.studentIds.map((value) => safeText(value)))
+        : Array.isArray(data.students)
+          ? unique(data.students.map((value) => safeText(value)))
+          : singleId
+            ? [singleId]
+            : [];
+
+      if (!linkedIds.length) {
+        return {
+          email, role, active,
+          total: 0, visibles: 0,
+          ok: false, issue: "Sin estudiantes vinculados", repaired: false,
+        };
+      }
+
+      // Todos los alias conocidos del/los estudiante(s) de este perfil.
+      const aliasSets = await Promise.all(
+        linkedIds.map((linkedId) => resolveStudentAliasIds(linkedId, {}))
+      );
+      const aliasIds = unique(aliasSets.flat());
+
+      // Bitácoras reales (docs crudos) alcanzables con cualquier alias.
+      const rawById = new Map();
+      const collectRaw = (snap) => {
+        for (const item of snap.docs) rawById.set(item.id, item.data() || {});
+      };
+
+      for (const part of chunk(aliasIds, MAX_IN)) {
+        if (!part.length) continue;
+        collectRaw(await getDocs(
+          query(bitacorasRef, where("studentIds", "array-contains-any", part))
+        ));
+      }
+      for (const aliasId of aliasIds) {
+        collectRaw(await getDocs(
+          query(bitacorasRef, where("studentId", "==", aliasId))
+        ));
+      }
+
+      const linkedSet = new Set(linkedIds);
+      const canSee = (raw) =>
+        (Array.isArray(raw.studentIds) &&
+          raw.studentIds.some((value) => linkedSet.has(safeText(value)))) ||
+        (typeof raw.studentId === "string" && linkedSet.has(safeText(raw.studentId)));
+
+      const rawDocs = [...rawById.values()];
+      let visibles = rawDocs.filter(canSee).length;
+      let repaired = false;
+
+      if (repair && visibles < rawDocs.length) {
+        const missingKeys = unique(
+          rawDocs
+            .filter((raw) => !canSee(raw))
+            .flatMap((raw) => [...safeArray(raw.studentIds), raw.studentId])
+            .map((value) => safeText(value))
+        );
+        const merged = unique([...linkedIds, ...missingKeys]);
+
+        await setDoc(
+          doc(db, COLLECTIONS.users, email),
+          {
+            email,
+            studentIds: merged,
+            students: merged,
+            repairedFromHub: true,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        repaired = true;
+        for (const key of merged) linkedSet.add(key);
+        visibles = rawDocs.filter(canSee).length;
+      }
+
+      return {
+        email, role, active,
+        total: rawDocs.length,
+        visibles,
+        ok: active && visibles === rawDocs.length,
+        issue: !active
+          ? "Acceso inactivo"
+          : visibles < rawDocs.length
+            ? `${rawDocs.length - visibles} bitácora(s) fuera de alcance`
+            : "",
+        repaired,
+      };
+    };
+
+    // Lotes pequeños para no saturar Firestore desde el navegador.
+    for (const part of chunk(usersSnap.docs, 5)) {
+      const settled = await Promise.all(
+        part.map((userDoc) => auditOne(userDoc).catch((error) => {
+          console.warn("[data] auditAllBitacoraAccess: perfil con error.", userDoc.id, error);
+          return {
+            email: normalizeEmail(userDoc.id),
+            role: "(error)", active: false,
+            total: 0, visibles: 0,
+            ok: false, issue: safeText(error?.message, "Error"), repaired: false,
+          };
+        }))
+      );
+      rows.push(...settled.filter(Boolean));
+    }
+
+    rows.sort((a, b) =>
+      Number(a.ok) - Number(b.ok) || a.email.localeCompare(b.email, "es")
+    );
+
+    return {
+      ok: rows.length > 0 && rows.every((row) => row.ok),
+      totalUsers: rows.length,
+      issues: rows.filter((row) => !row.ok).length,
+      rows,
+    };
+  } catch (error) {
+    throw withContextError(error, "auditAllBitacoraAccess");
+  }
+}
+
 export async function removeStudentEmailAccess(email, studentId) {
   try {
     const cleanEmail = normalizeEmail(email);

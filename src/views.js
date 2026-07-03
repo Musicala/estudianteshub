@@ -901,6 +901,18 @@ function renderEmailAccessCard(emails = [], studentId = "", audit = null) {
       <p class="note" style="margin-top:.5rem;">
         Verificación administrativa: perfil, estado, rol, identificadores del proceso y bitácoras visibles.
       </p>
+
+      <div class="cluster" style="margin-top:.75rem;gap:.5rem;">
+        ${button("Verificar TODOS los procesos", {
+          variant: "ghost",
+          action: "audit-all-access",
+          icon: "✓",
+        })}
+      </div>
+      <p class="note" style="margin-top:.35rem;">
+        Revisa todos los correos de estudiantes y acudientes, repara los vínculos
+        que falten y muestra quién puede ver sus bitácoras y quién no.
+      </p>
     `,
   });
 }

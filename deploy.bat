@@ -17,10 +17,10 @@ echo Subiendo numero de version del Service Worker...
 powershell -NoProfile -Command ^
   "$f='sw.js';" ^
   "$c=Get-Content $f -Raw;" ^
-  "$m=[regex]::Match($c,'CACHE_VERSION = \"v(\d+)\.(\d+)\.(\d+)\"');" ^
+  "$m=[regex]::Match($c,'CACHE_VERSION = \"v(\d+)\.(\d+)\.(\d+)[^\"]*\"');" ^
   "if(-not $m.Success){Write-Host 'No encontre CACHE_VERSION en sw.js'; exit 1};" ^
   "$nv='v'+$m.Groups[1].Value+'.'+$m.Groups[2].Value+'.'+([int]$m.Groups[3].Value+1);" ^
-  "$c=[regex]::Replace($c,'CACHE_VERSION = \"v\d+\.\d+\.\d+\"','CACHE_VERSION = \"'+$nv+'\"',1);" ^
+  "$c=[regex]::Replace($c,'CACHE_VERSION = \"v\d+\.\d+\.\d+[^\"]*\"','CACHE_VERSION = \"'+$nv+'\"',1);" ^
   "Set-Content $f $c -NoNewline -Encoding utf8;" ^
   "Write-Host ('Nueva version: '+$nv)"
 

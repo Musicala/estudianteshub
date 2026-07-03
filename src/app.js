@@ -1302,6 +1302,78 @@ async function handleAddStudentEmail() {
   }
 }
 
+async function handleAuditAllAccess() {
+  if (!isAdminUser()) {
+    toast("Solo un administrador de Musicala puede ejecutar la auditoría.", "info");
+    return;
+  }
+
+  openModal({
+    title: "Auditoría de bitácoras",
+    subtitle: "Verificando todos los procesos…",
+    bodyHTML: `
+      <p class="note">
+        Estamos revisando cada correo de estudiante/acudiente y reparando los
+        vínculos que falten. Esto puede tardar un par de minutos según el
+        número de estudiantes. No cierres esta ventana.
+      </p>
+    `,
+  });
+
+  try {
+    const result = await api.auditAllBitacoraAccess({ repair: true });
+
+    const rowsHTML = result.rows
+      .map((row) => {
+        const estado = row.ok
+          ? `<span style="color:var(--ok, #1a7f37);font-weight:600;">OK</span>`
+          : `<span style="color:var(--danger, #b42318);font-weight:600;">Revisar</span>`;
+        const detalle = [
+          `${row.visibles}/${row.total} bitácoras visibles`,
+          row.repaired ? "reparado" : "",
+          row.issue,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+        return `
+          <li style="padding:.4rem 0;border-bottom:1px solid var(--line, #eee);">
+            <strong>${escapeHtml(row.email)}</strong>
+            <span class="note" style="display:block;">
+              ${escapeHtml(row.role)} · ${estado} · ${escapeHtml(detalle)}
+            </span>
+          </li>
+        `;
+      })
+      .join("");
+
+    openModal({
+      title: result.ok
+        ? "✅ Todos los accesos están en orden"
+        : `⚠ ${result.issues} acceso(s) necesitan atención`,
+      subtitle: `${result.totalUsers} correos verificados. Los vínculos faltantes ya se repararon automáticamente.`,
+      bodyHTML: `
+        <ul style="list-style:none;padding:0;margin:0;max-height:55vh;overflow:auto;">
+          ${rowsHTML || `<li class="note">No hay correos de estudiantes registrados.</li>`}
+        </ul>
+        ${
+          result.ok
+            ? ""
+            : `<p class="note" style="margin-top:.6rem;">
+                Los casos "Revisar" que sigan apareciendo tras reparar suelen ser
+                accesos inactivos o correos sin estudiante vinculado: se corrigen
+                desde el panel del estudiante correspondiente.
+              </p>`
+        }
+      `,
+    });
+  } catch (error) {
+    console.error("[App] Auditoría global falló:", error);
+    closeModal();
+    toast(`No se pudo completar la auditoría. ${safeText(error?.message)}`, "danger");
+  }
+}
+
 async function handleRemoveStudentEmail(email) {
   if (!isAdminUser()) {
     toast("Solo un administrador de Musicala puede gestionar correos.", "info");
@@ -2006,6 +2078,11 @@ function bindCoreHandlers() {
 
     if (action === "remove-student-email") {
       await handleRemoveStudentEmail(actionEl.getAttribute("data-email"));
+      return;
+    }
+
+    if (action === "audit-all-access") {
+      await handleAuditAllAccess();
       return;
     }
   });
