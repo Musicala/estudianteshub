@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-13.1-identidad-canonica-readonly",
+  build: "2026-07-13.2-resolucion-identidad-logica",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -445,6 +445,7 @@ function cacheStudent(student = null) {
     student.studentKey,
     student.estudianteId,
     getCanonicalStudentKey(student),
+    ...(Array.isArray(student.linkedStudentIds) ? student.linkedStudentIds : []),
     ...(student.duplicateRecords || []).flatMap((record) => [
       record.id,
       record.studentId,
@@ -858,7 +859,12 @@ async function ensureAllStudents() {
   const knownIds = new Set();
   for (const student of profiled) {
     cacheStudent(student);
-    for (const alias of [student?.id, student?.studentId, student?.studentKey]) {
+    for (const alias of [
+      student?.id,
+      student?.studentId,
+      student?.studentKey,
+      ...(Array.isArray(student?.linkedStudentIds) ? student.linkedStudentIds : []),
+    ]) {
       const clean = safeText(alias);
       if (clean) knownIds.add(clean);
     }

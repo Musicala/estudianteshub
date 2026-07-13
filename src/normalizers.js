@@ -640,6 +640,7 @@ export function getStudentIdentity(student = null) {
   if (!student) return "";
 
   return (
+    safeText(student.canonicalStudentId) ||
     safeText(student.studentKey) ||
     safeText(student.id) ||
     safeText(student.studentId) ||
@@ -651,6 +652,7 @@ export function getStudentFallbackId(student = null) {
   if (!student) return "";
 
   return (
+    safeText(student.academicRecordId) ||
     safeText(student.id) ||
     safeText(student.studentId) ||
     safeText(student.documento)

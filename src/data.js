@@ -60,6 +60,7 @@ import {
   resolveStudentProcess,
   normalizeStudentProcesses,
 } from "./normalizers.js";
+import { resolveLogicalStudentRecords } from "./student-resolver.js";
 
 /* =============================================================================
   Constantes internas
@@ -110,6 +111,7 @@ function getStudentIdentity(student = null) {
   if (!student) return "";
 
   return (
+    safeText(student.canonicalStudentId) ||
     safeText(student.studentKey) ||
     safeText(student.id) ||
     safeText(student.studentId) ||
@@ -121,6 +123,7 @@ function getStudentFallbackId(student = null) {
   if (!student) return "";
 
   return (
+    safeText(student.academicRecordId) ||
     safeText(student.id) ||
     safeText(student.studentId) ||
     safeText(student.documento)
@@ -770,9 +773,7 @@ export async function getStudentsByIds(studentIds = []) {
       );
     }
 
-    const deduped = dedupeStudents(out, {
-      debug: Boolean(globalThis?.MUSICALA_DEBUG_STUDENTS),
-    });
+    const deduped = resolveLogicalStudentRecords(out);
     const map = new Map();
 
     for (const student of deduped) {
@@ -782,6 +783,7 @@ export async function getStudentsByIds(studentIds = []) {
         student.studentKey,
         student.estudianteId,
         getCanonicalStudentKey(student),
+        ...(student.linkedStudentIds || []),
         ...(student.duplicateRecords || []).flatMap((record) => [
           record.id,
           record.studentId,
@@ -818,12 +820,8 @@ export async function listAllStudents(max = 0) {
     const q = cap > 0 ? query(studentsRef, limit(cap)) : query(studentsRef);
     const snap = await getDocs(q);
 
-    const deduped = dedupeStudents(
-      docsToObjects(snap)
-        // Docs marcados como alias de un canónico: no son estudiantes extra.
-        .filter((item) => !safeText(item.legacyAliasOf))
-        .map((item) => normalizeStudent(item)),
-      { debug: Boolean(globalThis?.MUSICALA_DEBUG_STUDENTS) }
+    const deduped = resolveLogicalStudentRecords(
+      docsToObjects(snap).map((item) => normalizeStudent(item))
     );
 
     return deduped.sort((a, b) => {
@@ -940,6 +938,7 @@ function buildStudentAliasIds(student = null, baseId = "") {
       student?.studentKey,
       student?.estudianteId,
       student?.documento,
+      ...safeArray(student?.linkedStudentIds),
       ...safeArray(student?.duplicateRecords).flatMap((record) => [
         record?.id,
         record?.studentId,
@@ -1064,16 +1063,14 @@ export async function listBitacorasByStudent(studentId, options = {}) {
       Bitácoras antiguas pueden tener solo studentId (texto) y no la lista
       studentIds. Si aún no hay resultados, probamos igualdad por alias.
     */
-    if (!byDocId.size) {
-      for (const aliasId of aliasIds) {
-        try {
-          const snap = await getDocs(
-            query(bitacorasRef, where("studentId", "==", aliasId))
-          );
-          collectDocs(snap);
-        } catch (error) {
-          if (!isPermissionDenied(error)) throw error;
-        }
+    for (const aliasId of aliasIds) {
+      try {
+        const snap = await getDocs(
+          query(bitacorasRef, where("studentId", "==", aliasId))
+        );
+        collectDocs(snap);
+      } catch (error) {
+        if (!isPermissionDenied(error)) throw error;
       }
     }
 

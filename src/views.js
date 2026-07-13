@@ -1374,8 +1374,11 @@ async function renderJournal(deps) {
   const ctx = getCtx(deps);
   const api = getApi(deps);
   const studentId = getStudentId(ctx);
-  const authorizedAliasIds = safeArray(ctx.studentIds);
   const student = getStudent(ctx);
+  const authorizedAliasIds = [
+    ...safeArray(ctx.studentIds),
+    ...safeArray(student?.linkedStudentIds),
+  ];
 
   let rows = [];
   let journalError = null;
@@ -3387,7 +3390,11 @@ async function renderTimeline(deps) {
   await Promise.allSettled([
     (async () => {
       if (typeof api.listBitacorasByStudent === "function") {
-        bitacoras = await api.listBitacorasByStudent(studentId, { max: 60 }).catch(() => []);
+        bitacoras = await api.listBitacorasByStudent(studentId, {
+          max: 60,
+          student: getStudent(ctx),
+          aliasIds: safeArray(ctx.studentIds),
+        }).catch(() => []);
       }
     })(),
     (async () => {
