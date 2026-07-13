@@ -39,22 +39,6 @@
       "purpose": "maskable"
     }
   ],
-  "screenshots": [
-    {
-      "src": "./assets/screenshots/home-mobile.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Inicio del portal estudiantil"
-    },
-    {
-      "src": "./assets/screenshots/home-desktop.png",
-      "sizes": "1440x900",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Vista de escritorio del portal estudiantil"
-    }
-  ],
   "shortcuts": [
     {
       "name": "Mi ruta",

@@ -42,13 +42,28 @@ import {
   normalizeEmail as normalizeStudentEmail,
 } from "./normalizers.js";
 
+/*
+  ÚNICA capa de permisos del HUB. app.js no reimplementa perfil activo,
+  validación de acceso ni interpretación de estados: consume estos helpers.
+*/
+import {
+  validateAccessProfile as validateAccessPolicy,
+  getLinkedStudentIds,
+  canStudentAccessHub,
+  isProfileEnabled,
+  isAdminProfile,
+  isInternalProfile,
+  ACCESS_REASONS,
+  ACCESS_MESSAGES,
+} from "./permissions.js";
+
 /* =============================================================================
   Configuración local
 ============================================================================= */
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-02.13-consulta-cuenta-real",
+  build: "2026-07-13.1-identidad-canonica-readonly",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -105,48 +120,11 @@ const APP = Object.freeze({
   }),
 });
 
-/*
-  Correos con acceso de administrador garantizado, aunque todavía no exista un
-  documento en users/{email}. Debe coincidir con firestore.rules (isBootstrapAdmin)
-  y con ACCESS_CONFIG.bootstrapAdminEmails en config.js.
-*/
-const BOOTSTRAP_ADMIN_EMAILS = new Set([
-  "alekcaballeromusic@gmail.com",
-  "catalina.medina.leal@gmail.com",
-  "imusicala@gmail.com",
-  "adminmusicala@gmail.com",
-  "musicalaasesor@gmail.com",
-]);
-
-/*
-  Este hub solo usa roles de admin y estudiante.
-  Los docentes trabajan desde otro hub (mismo Firestore), así que aquí solo
-  reconocemos roles administrativos para habilitar "Ver como estudiante".
-*/
-const INTERNAL_ROLES = new Set([
-  "admin",
-  "administrativo",
-  "direccion",
-  "dirección",
-]);
-
-function isBootstrapAdminEmail(email = "") {
-  return BOOTSTRAP_ADMIN_EMAILS.has(normalizeEmail(email));
-}
-
-/*
-  Admin "estricto": coincide con isAdmin() de firestore.rules (correo bootstrap o
-  rol "admin" activo). Se usa para habilitar acciones que escriben en users/,
-  que las reglas solo permiten a admins.
-*/
 function isAdminUser() {
-  if (isBootstrapAdminEmail(state.user?.email)) return true;
-
-  const role = safeText(
-    state.accessProfile?.role || state.accessProfile?.rol || ""
-  ).toLowerCase();
-
-  return role === "admin" && state.accessProfile?.active !== false;
+  return Boolean(
+    isAdminProfile(state.accessProfile) &&
+    isProfileEnabled(state.accessProfile)
+  );
 }
 
 /* =============================================================================
@@ -271,34 +249,12 @@ function getStudentStatusText(student = null) {
 }
 
 /*
-  Misma política que las reglas de Firestore / el sync:
-  pueden entrar al HUB los "Activo*" y los "Inactivo en pausa (1-3 meses)".
-  La pausa de 3-6 meses (o más larga) NO entra.
+  Permiso por estudiante: OBEDECE student.rip.canAccessHub publicado por RIP
+  (política única). El texto del estado solo se muestra; no decide permisos.
+  Ver permissions.js → canStudentAccessHub.
 */
 function canStudentLogIn(student = null) {
-  const s = getStudentStatusText(student)
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[‐-―−]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!s) return false;
-
-  if (
-    s === "activo" ||
-    s.startsWith("activo no registro") ||
-    s.startsWith("activo en pausa")
-  ) {
-    return true;
-  }
-
-  if (s.startsWith("inactivo en pausa")) {
-    return /1\s*-\s*3/.test(s) || /1\s+a\s+3/.test(s);
-  }
-
-  return false;
+  return canStudentAccessHub(student);
 }
 
 function persistActiveStudentId(studentId) {
@@ -346,12 +302,9 @@ function resetStudentState() {
 }
 
 function isInternalUser() {
-  const role = safeText(
-    state.accessProfile?.role || state.accessProfile?.rol || ""
-  ).toLowerCase();
-
-  return (
-    INTERNAL_ROLES.has(role) || isBootstrapAdminEmail(state.user?.email)
+  return Boolean(
+    isInternalProfile(state.accessProfile) &&
+    isProfileEnabled(state.accessProfile)
   );
 }
 
@@ -474,48 +427,13 @@ function clearGlobalMessages() {
   }
 }
 
-/*
-  Si un correo es admin de arranque pero todavía no tiene documento en
-  users/{email}, igual le damos un perfil admin para que pueda entrar y usar
-  "Ver como estudiante". Las reglas de Firestore mandan en la seguridad real.
-*/
-function synthesizeAdminProfile(user) {
-  const email = normalizeEmail(user?.email);
-
-  return {
-    id: email,
-    email,
-    correo: email,
-    role: "admin",
-    rol: "admin",
-    active: true,
-    estado: "Activo",
-    displayName: safeText(user?.displayName, "Equipo Musicala"),
-    studentIds: [],
-    bootstrapAdmin: true,
-  };
-}
-
 /* =============================================================================
   Acceso y datos
 ============================================================================= */
 
+// Delegado a permissions.js (una sola implementación de vínculos).
 function extractStudentIdsFromAccessProfile(profile) {
-  if (!profile) return [];
-
-  const rawIds = [
-    ...(Array.isArray(profile.studentIds) ? profile.studentIds : []),
-    ...(Array.isArray(profile.students) ? profile.students : []),
-    ...(Array.isArray(profile.estudiantes) ? profile.estudiantes : []),
-    profile.studentId,
-    profile.studentKey,
-    profile.estudianteId,
-  ];
-
-  return rawIds
-    .map((id) => safeText(id))
-    .filter(Boolean)
-    .filter((id, index, arr) => arr.indexOf(id) === index);
+  return getLinkedStudentIds(profile);
 }
 
 function cacheStudent(student = null) {
@@ -613,97 +531,26 @@ async function resolveAccessProfile(user) {
 
   let profile = null;
 
-  if (typeof api.getAccessProfileByEmail === "function") {
-    profile = await api.getAccessProfileByEmail(email);
-  } else if (typeof api.getUserByEmail === "function") {
-    profile = await api.getUserByEmail(email);
-  } else if (typeof api.getUserCtx === "function") {
-    console.warn(
-      "[App] data.js todavía usa getUserCtx(uid). Se recomienda migrar a users/{email}."
-    );
-    profile = await api.getUserCtx(email);
-  } else {
+  if (typeof api.getAccessProfileByEmail !== "function") {
     throw new Error("DATA_API_MISSING_getAccessProfileByEmail");
   }
 
-  if (!profile && isBootstrapAdminEmail(email)) {
-    return synthesizeAdminProfile(user);
-  }
+  profile = await api.getAccessProfileByEmail(email);
 
   return profile;
 }
 
+/*
+  Validación de acceso delegada a permissions.js: la entrada depende de
+  user.accountEnabled !== false, user.canAccessHub !== false (publicados por
+  RIP) y de tener al menos un studentId vinculado. Sin lógica duplicada aquí.
+*/
 function validateAccessProfile(profile, user) {
-  const email = normalizeEmail(user?.email);
-
-  if (!profile) {
-    return {
-      ok: false,
-      reason: "NO_PROFILE",
-      message:
-        "Tu correo todavía no tiene acceso al portal de estudiantes. Revisa que esté registrado en Musicala.",
-    };
-  }
-
-  const active = profile.active !== false && profile.estado !== "inactivo";
-  if (!active) {
-    return {
-      ok: false,
-      reason: "INACTIVE_PROFILE",
-      message:
-        "Tu acceso está inactivo. Si crees que es un error, revisa con el equipo administrativo de Musicala.",
-    };
-  }
-
-  const role = safeText(profile.role || profile.rol || profile.type || profile.tipo).toLowerCase();
-
-  const allowedRoles = new Set([
-    "student",
-    "estudiante",
-    "acudiente",
-    "guardian",
-    "parent",
-    "admin",
-    "administrativo",
-    "direccion",
-    "dirección",
-    "teacher",
-    "docente",
-  ]);
-
-  if (role && !allowedRoles.has(role)) {
-    return {
-      ok: false,
-      reason: "INVALID_ROLE",
-      message:
-        "Tu usuario existe, pero no tiene un rol habilitado para ver Estudiantes HUB.",
-    };
-  }
-
-  const profileEmail = normalizeEmail(profile.email || profile.correo || profile.id);
-
-  if (profileEmail && email && profileEmail !== email) {
-    console.warn("[App] Email de perfil distinto al email autenticado:", {
-      profileEmail,
-      authEmail: email,
-    });
-  }
-
-  const studentIds = extractStudentIdsFromAccessProfile(profile);
-
-  if (!studentIds.length && !["admin", "administrativo", "direccion", "dirección"].includes(role)) {
-    return {
-      ok: false,
-      reason: "NO_STUDENTS",
-      message:
-        "Tu usuario no tiene estudiantes vinculados todavía. El portal cargó, pero no hay información para mostrar.",
-    };
-  }
-
+  const result = validateAccessPolicy(profile, user);
   return {
-    ok: true,
-    reason: "OK",
-    message: "",
+    ok: result.ok,
+    reason: result.reason,
+    message: result.message,
   };
 }
 
@@ -725,20 +572,73 @@ async function loadUserContext(user) {
     return validation;
   }
 
-  const persistedId = readPersistedStudentId();
-  const preferredId =
-    persistedId && state.studentIds.includes(persistedId)
-      ? persistedId
-      : state.studentIds[0] || null;
-
-  if (preferredId) {
-    await setActiveStudent(preferredId, { silent: true });
+  // Los perfiles internos conservan su acceso por rol aunque no tengan un
+  // estudiante vinculado. El selector administrativo es estrictamente lectura.
+  if (isInternalUser() && !state.studentIds.length) {
+    setStudentPickerVisibility();
+    setStudentLabel();
+    return validation;
   }
 
-  if (state.studentIds.length > 1) {
-    await preloadStudentsIfNeeded();
-  } else {
-    state.studentIds = consolidateStudentIdsFromCache(state.studentIds);
+  /*
+    Acudientes con varios estudiantes: se precargan primero para poder
+    preferir uno HABILITADO (rip.canAccessHub). Un estudiante inactivo no
+    bloquea la cuenta: se entra con el habilitado. Si NINGUNO tiene acceso,
+    se muestra un mensaje claro (la cuenta suele estar ya deshabilitada por
+    RIP, pero este es el respaldo por estudiante).
+  */
+  await preloadStudentsIfNeeded();
+  state.studentIds = consolidateStudentIdsFromCache(state.studentIds);
+
+  const existingIds = state.studentIds.filter((id) =>
+    state.studentsById.has(id)
+  );
+
+  if (!existingIds.length && !isInternalUser()) {
+    state.studentId = null;
+    state.student = null;
+    setStudentPickerVisibility();
+    setStudentLabel();
+    return {
+      ok: false,
+      reason: ACCESS_REASONS.STUDENT_DATA_PENDING,
+      message: ACCESS_MESSAGES[ACCESS_REASONS.STUDENT_DATA_PENDING],
+    };
+  }
+
+  const enabledIds = existingIds.filter((id) => {
+    const cached = state.studentsById.get(id);
+    return Boolean(cached && canStudentLogIn(cached));
+  });
+
+  if (!enabledIds.length && state.studentIds.length && !isInternalUser()) {
+    state.studentId = null;
+    state.student = null;
+    setStudentPickerVisibility();
+    setStudentLabel();
+    return {
+      ok: false,
+      reason: ACCESS_REASONS.STUDENT_DATA_PENDING,
+      message: ACCESS_MESSAGES[ACCESS_REASONS.STUDENT_DATA_PENDING],
+    };
+  }
+
+  const pool = enabledIds.length ? enabledIds : existingIds;
+  const persistedId = readPersistedStudentId();
+  const preferredId =
+    persistedId && pool.includes(persistedId)
+      ? persistedId
+      : pool[0] || null;
+
+  if (preferredId) {
+    const selected = await setActiveStudent(preferredId, { silent: true });
+    if (!selected && !isInternalUser()) {
+      return {
+        ok: false,
+        reason: ACCESS_REASONS.STUDENT_DATA_PENDING,
+        message: ACCESS_MESSAGES[ACCESS_REASONS.STUDENT_DATA_PENDING],
+      };
+    }
   }
 
   setStudentPickerVisibility();
@@ -823,15 +723,19 @@ async function setActiveStudent(studentId, options = {}) {
     throw new Error("STUDENT_NOT_ALLOWED");
   }
 
-  state.studentId = id;
-  persistActiveStudentId(id);
-
   const student = await getStudentById(id);
 
-  state.student = student || {
-    id,
-    displayName: "Estudiante vinculado",
-  };
+  if (!student) {
+    state.studentId = null;
+    state.student = null;
+    persistActiveStudentId(null);
+    setStudentLabel();
+    return null;
+  }
+
+  state.studentId = id;
+  state.student = student;
+  persistActiveStudentId(id);
 
   setStudentLabel();
 
@@ -1260,370 +1164,6 @@ function wireMoreSheet() {
 /* =============================================================================
   Dependencias para vistas
 ============================================================================= */
-
-/* =============================================================================
-  Gestión de correos del proceso (subcorreos / acudientes)
-============================================================================= */
-
-function getActiveStudentId() {
-  return safeText(state.viewAsStudentId || state.studentId || state.student?.id || "");
-}
-
-async function handleAddStudentEmail() {
-  if (!isAdminUser()) {
-    toast("Solo un administrador de Musicala puede asignar correos.", "info");
-    return;
-  }
-
-  const input = document.getElementById("newStudentEmailInput");
-  const email = safeText(input?.value);
-  const studentId = safeText(input?.dataset?.studentRef) || getActiveStudentId();
-
-  if (!email) {
-    toast("Escribe un correo para agregar.", "warning");
-    return;
-  }
-
-  if (!studentId) {
-    toast("No hay un estudiante seleccionado.", "warning");
-    return;
-  }
-
-  try {
-    await api.addStudentEmailAccess(studentId, email, {
-      actorEmail: state.user?.email || "",
-      student: state.student || null,
-    });
-    toast("Correo agregado al proceso.", "success");
-    await navigate({ force: true });
-  } catch (error) {
-    console.error("[App] No se pudo agregar correo:", error);
-    toast(`No se pudo agregar el correo. ${safeText(error?.message)}`, "danger");
-  }
-}
-
-async function handleAuditAllAccess() {
-  if (!isAdminUser()) {
-    toast("Solo un administrador de Musicala puede ejecutar la auditoría.", "info");
-    return;
-  }
-
-  openModal({
-    title: "Auditoría de bitácoras",
-    subtitle: "Verificando todos los procesos…",
-    bodyHTML: `
-      <p class="note">
-        Estamos revisando cada correo de estudiante/acudiente y reparando los
-        vínculos que falten. Esto puede tardar un par de minutos según el
-        número de estudiantes. No cierres esta ventana.
-      </p>
-    `,
-  });
-
-  try {
-    const result = await api.auditAllBitacoraAccess({ repair: true });
-
-    const rowsHTML = result.rows
-      .map((row) => {
-        const estado = row.ok
-          ? `<span style="color:var(--ok, #1a7f37);font-weight:600;">OK</span>`
-          : `<span style="color:var(--danger, #b42318);font-weight:600;">Revisar</span>`;
-        const detalle = [
-          `${row.visibles}/${row.total} bitácoras visibles`,
-          row.repaired ? "reparado" : "",
-          row.issue,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-
-        return `
-          <li style="padding:.4rem 0;border-bottom:1px solid var(--line, #eee);">
-            <strong>${escapeHtml(row.email)}</strong>
-            <span class="note" style="display:block;">
-              ${escapeHtml(row.role)} · ${estado} · ${escapeHtml(detalle)}
-            </span>
-          </li>
-        `;
-      })
-      .join("");
-
-    openModal({
-      title: result.ok
-        ? "✅ Todos los accesos están en orden"
-        : `⚠ ${result.issues} acceso(s) necesitan atención`,
-      subtitle: `${result.totalUsers} correos verificados. Los vínculos faltantes ya se repararon automáticamente.`,
-      bodyHTML: `
-        <ul style="list-style:none;padding:0;margin:0;max-height:55vh;overflow:auto;">
-          ${rowsHTML || `<li class="note">No hay correos de estudiantes registrados.</li>`}
-        </ul>
-        ${
-          result.ok
-            ? ""
-            : `<p class="note" style="margin-top:.6rem;">
-                Los casos "Revisar" que sigan apareciendo tras reparar suelen ser
-                accesos inactivos o correos sin estudiante vinculado: se corrigen
-                desde el panel del estudiante correspondiente.
-              </p>`
-        }
-      `,
-    });
-  } catch (error) {
-    console.error("[App] Auditoría global falló:", error);
-    closeModal();
-    toast(`No se pudo completar la auditoría. ${safeText(error?.message)}`, "danger");
-  }
-}
-
-async function handleRemoveStudentEmail(email) {
-  if (!isAdminUser()) {
-    toast("Solo un administrador de Musicala puede gestionar correos.", "info");
-    return;
-  }
-
-  const cleanEmail = safeText(email);
-  const studentId = getActiveStudentId();
-
-  if (!cleanEmail || !studentId) return;
-
-  const confirmed = window.confirm(
-    `¿Quitar el acceso de ${cleanEmail} a este estudiante?`
-  );
-  if (!confirmed) return;
-
-  try {
-    await api.removeStudentEmailAccess(cleanEmail, studentId);
-    toast("Correo retirado del proceso.", "success");
-    await navigate({ force: true });
-  } catch (error) {
-    console.error("[App] No se pudo quitar correo:", error);
-    toast(`No se pudo quitar el correo. ${safeText(error?.message)}`, "danger");
-  }
-}
-
-/* =============================================================================
-  Panel admin de recursos por estudiante
-  Muestra qué ve / qué se le oculta de la biblioteca y permite asignar recursos
-  a mano o activar "ver toda la biblioteca" para el estudiante seleccionado.
-============================================================================= */
-
-let resourceAdmin = null;
-
-function resourceIsVisible(row) {
-  if (!resourceAdmin) return false;
-  if (resourceAdmin.excluded.has(row.id)) return false;
-  if (resourceAdmin.assigned.has(row.id)) return true;
-  return Boolean(row.publicado) && (resourceAdmin.verTodo || Boolean(row.pasaFiltroArea));
-}
-
-async function invalidateActiveStudent() {
-  // Borra del cache al estudiante activo y lo vuelve a cargar para que la vista
-  // de recursos refleje los cambios de asignación/override al cerrar el panel.
-  const id = getActiveStudentId();
-  if (!id) return;
-
-  for (const [key, value] of state.studentsById) {
-    if (value?.id === id || key === id) {
-      state.studentsById.delete(key);
-    }
-  }
-
-  try {
-    await setActiveStudent(id, { silent: true });
-  } catch (error) {
-    console.warn("[App] No se pudo refrescar el estudiante:", error);
-  }
-}
-
-async function openResourceAdmin() {
-  if (!isAdminUser()) {
-    toast("Solo un administrador de Musicala puede gestionar recursos.", "info");
-    return;
-  }
-
-  const studentId = getActiveStudentId();
-  if (!studentId || !state.student) {
-    toast("Selecciona o entra como un estudiante primero.", "info");
-    return;
-  }
-
-  openModal({
-    title: "Recursos del estudiante",
-    subtitle: getStudentName(state.student, "Estudiante"),
-    bodyHTML: `<p class="note">Cargando diagnóstico de la biblioteca…</p>`,
-    footHTML: `<button class="btn btn--primary" type="button" data-action="resource-admin-done">Listo</button>`,
-  });
-
-  try {
-    const diag = await api.diagnoseResources({ student: state.student });
-    const rows = Array.isArray(diag?.todos) ? diag.todos : [];
-
-    resourceAdmin = {
-      studentId,
-      verTodo: Boolean(diag?.resumen?.verTodoSinFiltro),
-      assigned: new Set(rows.filter((row) => row.asignado).map((row) => row.id)),
-      excluded: new Set(rows.filter((row) => row.oculto).map((row) => row.id)),
-      rows,
-      filter: "",
-      dirty: false,
-    };
-
-    renderResourceAdminBody();
-  } catch (error) {
-    console.error("[App] No se pudo cargar el diagnóstico de recursos:", error);
-    const body = document.getElementById("modalBody");
-    if (body) {
-      body.innerHTML = `<p class="note">No se pudo cargar la biblioteca. ${escapeHtml(safeText(error?.message))}</p>`;
-    }
-  }
-}
-
-function renderResourceAdminBody() {
-  const body = document.getElementById("modalBody");
-  if (!body || !resourceAdmin) return;
-
-  const rows = resourceAdmin.rows;
-  const visibleCount = rows.filter((row) => resourceIsVisible(row)).length;
-  const hiddenCount = rows.length - visibleCount;
-
-  const listHTML = rows
-    .map((row) => {
-      const visible = resourceIsVisible(row);
-      const assigned = resourceAdmin.assigned.has(row.id);
-      const excluded = resourceAdmin.excluded.has(row.id);
-
-      let motivo;
-      if (excluded) motivo = "ocultado a mano";
-      else if (!row.publicado) motivo = "no publicado";
-      else if (assigned && !row.pasaFiltroArea && !resourceAdmin.verTodo) motivo = "puesto a mano";
-      else if (visible) motivo = "incluido por su proceso";
-      else motivo = "fuera de su arte/instrumento";
-
-      return `
-        <div class="pick-item" data-resource-row="${escapeHtml(row.id)}" style="display:flex;gap:8px;align-items:center;justify-content:space-between">
-          <div style="min-width:0">
-            <div class="pick-item__title">${escapeHtml(safeText(row.titulo, "Recurso"))}</div>
-            <div class="pick-item__meta">
-              ${escapeHtml(safeText(row.area, "sin área"))}
-              · <span class="${visible ? "login-badge login-badge--ok" : "login-badge login-badge--no"}">${visible ? "✓ visible" : "⛔ oculto"}</span>
-              <span class="muted">· ${escapeHtml(motivo)}</span>
-            </div>
-          </div>
-          <button
-            class="btn ${visible ? "btn--ghost" : "btn--primary"} btn--sm"
-            type="button"
-            data-visible-id="${escapeHtml(row.id)}"
-            data-visible-next="${visible ? "0" : "1"}"
-          >
-            ${visible ? "Quitar" : "Poner"}
-          </button>
-        </div>
-      `;
-    })
-    .join("");
-
-  body.innerHTML = `
-    <div class="stack">
-      <p class="note">
-        <strong>${visibleCount}</strong> visibles ·
-        <strong>${hiddenCount}</strong> ocultos ·
-        de <strong>${rows.length}</strong> en la biblioteca
-      </p>
-
-      <label class="pick-item" style="display:flex;gap:10px;align-items:center;cursor:pointer">
-        <input id="resourceAdminShowAll" type="checkbox" ${resourceAdmin.verTodo ? "checked" : ""} />
-        <span>
-          <strong>Ver toda la biblioteca</strong>
-          <span class="pick-item__meta">Muestra todos los recursos publicados, sin filtrar por arte/instrumento.</span>
-        </span>
-      </label>
-
-      <input
-        id="resourceAdminSearch"
-        class="input"
-        type="search"
-        placeholder="Buscar recurso por nombre o área…"
-        autocomplete="off"
-        aria-label="Buscar recurso"
-        value="${escapeHtml(resourceAdmin.filter)}"
-      />
-
-      <div class="pick-list" id="resourceAdminList">
-        ${listHTML}
-      </div>
-    </div>
-  `;
-
-  wireResourceAdminBody();
-  applyResourceAdminFilter();
-}
-
-function applyResourceAdminFilter() {
-  const list = document.getElementById("resourceAdminList");
-  if (!list || !resourceAdmin) return;
-
-  const term = safeText(resourceAdmin.filter).toLowerCase();
-
-  list.querySelectorAll("[data-resource-row]").forEach((rowEl) => {
-    const match = !term || rowEl.textContent.toLowerCase().includes(term);
-    rowEl.hidden = !match;
-  });
-}
-
-function wireResourceAdminBody() {
-  const body = document.getElementById("modalBody");
-  if (!body || !resourceAdmin) return;
-
-  const search = body.querySelector("#resourceAdminSearch");
-  search?.addEventListener("input", () => {
-    resourceAdmin.filter = search.value;
-    applyResourceAdminFilter();
-  });
-
-  const showAll = body.querySelector("#resourceAdminShowAll");
-  showAll?.addEventListener("change", async () => {
-    const next = Boolean(showAll.checked);
-    showAll.disabled = true;
-    try {
-      await api.setStudentShowAllResources(resourceAdmin.studentId, next);
-      resourceAdmin.verTodo = next;
-      resourceAdmin.dirty = true;
-      renderResourceAdminBody();
-      toast(next ? "Ahora ve toda la biblioteca." : "Filtro por proceso reactivado.", "success");
-    } catch (error) {
-      console.error("[App] No se pudo cambiar 'ver todo':", error);
-      toast("No se pudo guardar el cambio.", "danger");
-      showAll.disabled = false;
-    }
-  });
-
-  body.querySelector("#resourceAdminList")?.addEventListener("click", async (event) => {
-    const btn = event.target?.closest?.("[data-visible-id]");
-    if (!btn) return;
-
-    const id = btn.getAttribute("data-visible-id");
-    const makeVisible = btn.getAttribute("data-visible-next") === "1";
-    if (!id) return;
-
-    btn.disabled = true;
-    try {
-      await api.setStudentResourceVisibility(resourceAdmin.studentId, id, makeVisible);
-      if (makeVisible) {
-        resourceAdmin.assigned.add(id);
-        resourceAdmin.excluded.delete(id);
-      } else {
-        resourceAdmin.assigned.delete(id);
-        resourceAdmin.excluded.add(id);
-      }
-      resourceAdmin.dirty = true;
-      renderResourceAdminBody();
-    } catch (error) {
-      console.error("[App] No se pudo cambiar la visibilidad del recurso:", error);
-      toast("No se pudo guardar el cambio.", "danger");
-      btn.disabled = false;
-    }
-  });
-}
-
 function getContext() {
   return {
     app: APP,
@@ -1750,7 +1290,7 @@ function renderAdminLanding() {
   `;
 }
 
-function renderNoAccess(message) {
+function renderPendingAccess() {
   return `
     <section class="stack">
       <article class="hero-card">
@@ -1760,11 +1300,38 @@ function renderNoAccess(message) {
         </div>
 
         <h1 class="hero-card__title">
-          No encontramos información vinculada
+          Estamos preparando tu acceso
         </h1>
 
         <p class="hero-card__text">
-          ${escapeHtml(message || "Tu usuario inició sesión, pero no tiene un estudiante vinculado todavía.")}
+          ${escapeHtml(ACCESS_MESSAGES[ACCESS_REASONS.STUDENT_DATA_PENDING])}
+        </p>
+
+        <div class="hero-card__actions">
+          <button class="btn btn--ghost" type="button" data-action="logout">
+            Cerrar sesión
+          </button>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderAccessNotFound() {
+  return `
+    <section class="stack">
+      <article class="hero-card">
+        <div class="hero-card__badge">
+          <span aria-hidden="true">🔎</span>
+          <span>Acceso no encontrado</span>
+        </div>
+
+        <h1 class="hero-card__title">
+          No encontramos tu acceso
+        </h1>
+
+        <p class="hero-card__text">
+          ${escapeHtml(ACCESS_MESSAGES[ACCESS_REASONS.NO_ACCESS_PROFILE])}
         </p>
 
         <div class="hero-card__actions">
@@ -1865,11 +1432,21 @@ async function render(route) {
         return;
       }
 
-      const message =
-        state.lastError?.message ||
-        "Tu acceso todavía no está activo. Si acabas de registrarte, dale unos minutos o escríbele a tu profe de Musicala. 🎵";
+      if (state.lastError?.code === ACCESS_REASONS.NO_ACCESS_PROFILE) {
+        els.view.innerHTML = renderAccessNotFound();
+        return;
+      }
 
-      els.view.innerHTML = renderNoAccess(message);
+      if (state.accessProfile) {
+        els.view.innerHTML = renderPendingAccess();
+        return;
+      }
+
+      els.view.innerHTML = renderBootError(
+        "No pudimos validar tu acceso",
+        state.lastError?.message ||
+          "No pudimos consultar tu perfil en este momento. Intenta de nuevo."
+      );
       return;
     }
 
@@ -2055,36 +1632,6 @@ function bindCoreHandlers() {
       return;
     }
 
-    if (action === "open-resource-admin") {
-      await openResourceAdmin();
-      return;
-    }
-
-    if (action === "resource-admin-done") {
-      const wasDirty = Boolean(resourceAdmin?.dirty);
-      closeModal();
-      if (wasDirty) {
-        await invalidateActiveStudent();
-        await navigate({ force: true });
-      }
-      resourceAdmin = null;
-      return;
-    }
-
-    if (action === "add-student-email") {
-      await handleAddStudentEmail();
-      return;
-    }
-
-    if (action === "remove-student-email") {
-      await handleRemoveStudentEmail(actionEl.getAttribute("data-email"));
-      return;
-    }
-
-    if (action === "audit-all-access") {
-      await handleAuditAllAccess();
-      return;
-    }
   });
 
   document.addEventListener("keydown", (event) => {

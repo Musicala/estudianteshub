@@ -828,95 +828,6 @@ async function renderHome(deps) {
 /* =============================================================================
   Profile
 ============================================================================= */
-
-function renderEmailAccessCard(emails = [], studentId = "", audit = null) {
-  const list = safeArray(emails);
-  const auditByEmail = new Map(
-    safeArray(audit?.rows).map((row) => [uiSafeText(row?.email).toLowerCase(), row])
-  );
-
-  const itemsHTML = list.length
-    ? list
-        .map((entry) => {
-          const email = uiSafeText(entry?.email);
-          if (!email) return "";
-          const role = uiSafeText(entry?.role || "acudiente");
-          const inactive = entry?.active === false;
-          const check = auditByEmail.get(email.toLowerCase());
-          const badge = check?.ok
-            ? `<span class="login-badge login-badge--ok">✓ vínculos correctos</span>`
-            : `<span class="login-badge login-badge--no">⛔ revisar acceso</span>`;
-          const checkDetail = check
-            ? check.ok
-              ? `${check.visibleBitacoras} bitácoras asociadas · falta confirmar desde esa cuenta`
-              : check.issues.join(" · ")
-            : "No se pudo ejecutar la verificación";
-
-          return `
-            <li class="cluster" style="justify-content:space-between;gap:.75rem;align-items:center;">
-              <span style="min-width:0;">
-                <span class="cluster" style="gap:.4rem;align-items:center;">
-                  <strong>${escapeHtml(email)}</strong>
-                  ${badge}
-                </span>
-                <span class="note" style="display:block;margin-top:.2rem;">
-                  ${escapeHtml(role)}${inactive ? " · inactivo" : ""} · ${escapeHtml(checkDetail)}
-                </span>
-              </span>
-              <button
-                class="btn btn--ghost btn--sm"
-                type="button"
-                data-action="remove-student-email"
-                data-email="${escapeAttr(email)}"
-              >Quitar</button>
-            </li>
-          `;
-        })
-        .join("")
-    : `<li class="note">Aún no hay correos adicionales para este proceso.</li>`;
-
-  return card({
-    title: "Correos con acceso a este proceso",
-    subtitle:
-      "Agrega correos de acudientes o de un segundo padre/madre para que vean el mismo estudiante.",
-    bodyHTML: `
-      <ul class="stack" style="list-style:none;padding:0;margin:0 0 .75rem;">
-        ${itemsHTML}
-      </ul>
-
-      <div class="cluster" style="gap:.5rem;">
-        <input
-          id="newStudentEmailInput"
-          class="input"
-          type="email"
-          inputmode="email"
-          autocomplete="off"
-          placeholder="correo@ejemplo.com"
-          data-student-ref="${escapeAttr(studentId)}"
-          style="flex:1 1 220px;"
-        />
-        ${button("Agregar correo", { variant: "primary", action: "add-student-email", icon: "✚" })}
-      </div>
-
-      <p class="note" style="margin-top:.5rem;">
-        Verificación administrativa: perfil, estado, rol, identificadores del proceso y bitácoras visibles.
-      </p>
-
-      <div class="cluster" style="margin-top:.75rem;gap:.5rem;">
-        ${button("Verificar TODOS los procesos", {
-          variant: "ghost",
-          action: "audit-all-access",
-          icon: "✓",
-        })}
-      </div>
-      <p class="note" style="margin-top:.35rem;">
-        Revisa todos los correos de estudiantes y acudientes, repara los vínculos
-        que falten y muestra quién puede ver sus bitácoras y quién no.
-      </p>
-    `,
-  });
-}
-
 async function renderProfile(deps) {
   const ctx = getCtx(deps);
   const student = getStudent(ctx);
@@ -928,33 +839,6 @@ async function renderProfile(deps) {
     ["Rol", ctx.accessProfile?.role || ctx.userCtx?.role || ""],
     ["Estado de acceso", ctx.accessProfile?.active === false ? "Inactivo" : "Activo"],
   ].filter(([, value]) => uiSafeText(value));
-
-  // Gestión de correos del proceso: solo para administradores (coincide con las
-  // reglas de Firestore, que solo permiten a un admin escribir en users/).
-  let emailAccessCardHTML = "";
-  if (ctx.isAdmin) {
-    const api = getApi(deps);
-    const studentId = getStudentId(ctx);
-    let emails = [];
-    let accessAudit = null;
-
-    if (studentId && typeof api.listStudentEmailAccess === "function") {
-      if (typeof api.repairStudentEmailAccess === "function") {
-        await api.repairStudentEmailAccess(studentId, { student }).catch((error) => {
-          console.warn("[views] No se pudieron reparar todos los accesos del proceso.", error);
-        });
-      }
-      emails = await api.listStudentEmailAccess(studentId).catch(() => []);
-      if (typeof api.auditStudentEmailAccess === "function") {
-        accessAudit = await api.auditStudentEmailAccess(studentId, { student }).catch((error) => {
-          console.warn("[views] No se pudo auditar el acceso del proceso.", error);
-          return null;
-        });
-      }
-    }
-
-    emailAccessCardHTML = renderEmailAccessCard(emails, studentId, accessAudit);
-  }
 
   const html = `
     ${viewHeader("Mi perfil", studentSubtitle(ctx), {
@@ -977,8 +861,6 @@ async function renderProfile(deps) {
           bodyHTML: kvList(accessRows),
         })}
       </div>
-
-      ${emailAccessCardHTML}
 
       ${card({
         title: "Acciones",
@@ -1834,34 +1716,6 @@ function openBitacoraModal(item = {}) {
 /* =============================================================================
   Resources
 ============================================================================= */
-
-/*
-  Botón de diagnóstico de recursos: solo para admins. Abre un panel que muestra
-  qué recursos ve el estudiante seleccionado, cuáles se le ocultan y por qué, y
-  permite asignar recursos a mano o activar "ver toda la biblioteca".
-*/
-function resourceAdminButton(ctx) {
-  if (!ctx?.isAdmin) return "";
-
-  return `
-    <div class="card" style="margin-bottom:12px">
-      <div class="card__head">
-        <div>
-          <h2 class="card__title">🛠️ Recursos del estudiante (admin)</h2>
-          <p class="card__subtitle">
-            Revisa qué ve y qué se le oculta, asigna recursos a mano o muéstrale toda la biblioteca.
-          </p>
-        </div>
-      </div>
-      <div class="card__footer">
-        <button class="btn btn--primary btn--sm" type="button" data-action="open-resource-admin">
-          Abrir panel de recursos
-        </button>
-      </div>
-    </div>
-  `;
-}
-
 async function renderResources(deps) {
   const ctx = getCtx(deps);
   const api = getApi(deps);
@@ -1887,8 +1741,6 @@ async function renderResources(deps) {
         eyebrow: "Material de apoyo",
       })}
 
-      ${resourceAdminButton(ctx)}
-
       ${emptyState(
         "Aún no hay recursos",
         "Cuando Musicala publique materiales de estudio para tu proceso, aparecerán aquí.",
@@ -1913,8 +1765,6 @@ async function renderResources(deps) {
     ${viewHeader("Recursos", studentSubtitle(ctx), {
       eyebrow: "Material de apoyo",
     })}
-
-    ${resourceAdminButton(ctx)}
 
     <div class="biblio">
       <div class="biblioToolbar">

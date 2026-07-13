@@ -361,16 +361,13 @@ export function normalizeAccessProfile(raw = null) {
   );
 
   const role = safeText(
-    firstValue(raw.role, raw.rol, raw.type, raw.tipo, "student")
+    firstValue(raw.role, raw.rol, raw.type, raw.tipo, "")
   ).toLowerCase();
+  const canonicalStudentId = safeText(raw.studentId);
 
   const studentIds = uniqueArray([
     ...safeArray(raw.studentIds),
-    ...safeArray(raw.students),
-    ...safeArray(raw.estudiantes),
-    raw.studentId,
-    raw.studentKey,
-    raw.estudianteId,
+    canonicalStudentId,
   ].map((item) => safeText(item)));
 
   const active =
@@ -390,8 +387,7 @@ export function normalizeAccessProfile(raw = null) {
 
     active,
     studentIds,
-    students: raw.students || studentIds,
-    studentId: raw.studentId || studentIds[0] || null,
+    studentId: canonicalStudentId || studentIds[0] || null,
 
     displayName: firstValue(
       raw.displayName,
@@ -459,12 +455,26 @@ export function normalizeStudent(raw = null) {
     firstValue(raw.teacher, raw.docente, raw.teacherName, raw.mainTeacher)
   );
 
+  /*
+    Estado publicado por RIP (students/{id}.rip): es la fuente de verdad del
+    estado operativo. El HUB nunca lo calcula; solo lo muestra. Los campos
+    planos (status/estado) quedan como compatibilidad para docs sin sync.
+  */
+  const rip = raw.rip && typeof raw.rip === "object" ? raw.rip : null;
   const status = safeText(
-    firstValue(raw.status, raw.estado, raw.state)
+    firstValue(rip?.statusLabel, raw.status, raw.estado, raw.state)
   );
 
   return normalizeDateFields({
     ...raw,
+
+    rip: rip || undefined,
+    canAccessHub: rip && typeof rip.canAccessHub === "boolean" ? rip.canAccessHub : undefined,
+    remainingClasses: rip && Number.isFinite(Number(rip.remainingClasses))
+      ? Number(rip.remainingClasses)
+      : raw.remainingClasses,
+    nextClassDate: safeText(firstValue(rip?.nextClassDate, raw.nextClassDate)),
+    lastClassDate: safeText(firstValue(rip?.lastClassDate, raw.lastClassDate)),
 
     id,
 

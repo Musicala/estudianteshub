@@ -50,6 +50,7 @@ export const ACCESS_REASONS = Object.freeze({
   INVALID_ROLE: "INVALID_ROLE",
 
   NO_LINKED_STUDENTS: "NO_LINKED_STUDENTS",
+  STUDENT_DATA_PENDING: "STUDENT_DATA_PENDING",
   STUDENT_NOT_ALLOWED: "STUDENT_NOT_ALLOWED",
   NO_STUDENT_SELECTED: "NO_STUDENT_SELECTED",
 
@@ -66,16 +67,19 @@ export const ACCESS_MESSAGES = Object.freeze({
     "Tu cuenta de Google no entregó un correo válido. Revisa que estés usando una cuenta normal de Google.",
 
   [ACCESS_REASONS.NO_ACCESS_PROFILE]:
-    "Tu correo todavía no tiene acceso al portal de estudiantes. Revisa que esté registrado en Musicala.",
+    "No encontramos un acceso registrado para este correo. Comunícate con el equipo administrativo de Musicala para verificar tu cuenta.",
 
   [ACCESS_REASONS.INACTIVE_PROFILE]:
-    "Tu acceso está inactivo. Si crees que es un error, revisa con el equipo administrativo de Musicala.",
+    "Estamos preparando tu acceso al HUB. Tu información ya está registrada y estará disponible próximamente.",
 
   [ACCESS_REASONS.INVALID_ROLE]:
-    "Tu usuario existe, pero no tiene un rol habilitado para ver Estudiantes HUB.",
+    "Estamos preparando tu acceso al HUB. Tu información ya está registrada y estará disponible próximamente.",
 
   [ACCESS_REASONS.NO_LINKED_STUDENTS]:
-    "Tu usuario no tiene estudiantes vinculados todavía.",
+    "Estamos preparando tu acceso al HUB. Tu información ya está registrada y estará disponible próximamente.",
+
+  [ACCESS_REASONS.STUDENT_DATA_PENDING]:
+    "Estamos preparando tu acceso al HUB. Tu información ya está registrada y estará disponible próximamente.",
 
   [ACCESS_REASONS.STUDENT_NOT_ALLOWED]:
     "Este estudiante no está vinculado a tu usuario.",
@@ -133,7 +137,7 @@ export function getProfileRole(profile = null) {
       profile?.rol ||
       profile?.type ||
       profile?.tipo ||
-      "student"
+      ""
   );
 }
 
@@ -150,16 +154,39 @@ export function isProfileActive(profile = null) {
   return true;
 }
 
+/*
+  Puerta de entrada al portal (política ÚNICA publicada por RIP en users/):
+  - accountEnabled === false  → no entra;
+  - canAccessHub  === false  → no entra;
+  - compatibilidad: active/estado heredados para perfiles sin sync RIP.
+  Nadie en el frontend vuelve a interpretar el texto del estado.
+*/
+export function isProfileEnabled(profile = null) {
+  if (!profile) return false;
+  if (profile.accountEnabled === false) return false;
+  if (profile.canAccessHub === false) return false;
+  return isProfileActive(profile);
+}
+
+/*
+  Permiso POR ESTUDIANTE, publicado por RIP en students/{id}.rip.canAccessHub.
+  Si el estudiante aún no tiene mapa rip (transición), no se interpreta el
+  texto del estado: la puerta real ya la puso users.accountEnabled.
+*/
+export function canStudentAccessHub(student = null) {
+  if (!student) return false;
+  const rip = student.rip && typeof student.rip === "object" ? student.rip : null;
+  if (rip && typeof rip.canAccessHub === "boolean") return rip.canAccessHub;
+  if (typeof student.canAccessHub === "boolean") return student.canAccessHub;
+  return true;
+}
+
 export function getLinkedStudentIds(profile = null) {
   if (!profile) return [];
 
   return uniqueArray([
     ...safeArray(profile.studentIds),
-    ...safeArray(profile.students),
-    ...safeArray(profile.estudiantes),
     profile.studentId,
-    profile.studentKey,
-    profile.estudianteId,
   ].map((item) => safeText(item)));
 }
 
@@ -249,7 +276,7 @@ export function validateAccessProfile(profile = null, user = null, options = {})
   const role = getProfileRole(profile);
   const studentIds = getLinkedStudentIds(profile);
 
-  if (requireActiveUser && !isProfileActive(profile)) {
+  if (requireActiveUser && !isProfileEnabled(profile)) {
     return makeResult({
       ok: false,
       reason: ACCESS_REASONS.INACTIVE_PROFILE,
@@ -595,6 +622,8 @@ export const permissions = Object.freeze({
   getLinkedStudentIds,
 
   isProfileActive,
+  isProfileEnabled,
+  canStudentAccessHub,
   isAdminProfile,
   isTeacherProfile,
   isStudentProfile,

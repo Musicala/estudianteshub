@@ -10,10 +10,10 @@
   - Leer bitácoras desde colección global bitacoras
   - Leer rutas desde student_routes
   - Leer recursos y eventos globales
-  - Mantener aliases compatibles con versiones anteriores
+  - Resolver identidad exclusivamente desde users/{emailNormalizado}
 
   Este archivo NO renderiza UI.
-  Este archivo NO crea usuarios automáticamente.
+  Este archivo NO crea ni repara identidades.
 ============================================================================= */
 
 import {
@@ -289,6 +289,13 @@ function withContextError(error, context) {
   return wrapped;
 }
 
+function isPermissionError(error) {
+  const text = String(error?.code || error?.message || error || "").toLowerCase();
+  return text.includes("permission-denied") ||
+    text.includes("missing or insufficient permissions") ||
+    text.includes("permission");
+}
+
 async function getDocsSafe(primaryQuery, fallbackQuery = null, context = "query") {
   try {
     return await getDocs(primaryQuery);
@@ -320,15 +327,13 @@ export function normalizeAccessProfile(raw = null) {
   if (!raw) return null;
 
   const email = normalizeEmail(raw.email || raw.correo || raw.id);
-  const role = safeText(raw.role || raw.rol || raw.type || raw.tipo || "student")
+  const role = safeText(raw.role || raw.rol || raw.type || raw.tipo || "")
     .toLowerCase();
+  const canonicalStudentId = safeText(raw.studentId);
 
   const studentIds = unique([
     ...safeArray(raw.studentIds),
-    ...safeArray(raw.students),
-    raw.studentId,
-    raw.studentKey,
-    raw.estudianteId,
+    canonicalStudentId,
   ].map((id) => safeText(id)));
 
   return {
@@ -338,7 +343,7 @@ export function normalizeAccessProfile(raw = null) {
     role,
     active: raw.active !== false && raw.estado !== "inactivo",
     studentIds,
-    studentId: studentIds[0] || null,
+    studentId: canonicalStudentId || studentIds[0] || null,
     displayName: raw.displayName || raw.nombre || raw.name || raw.fullName || "",
   };
 }
@@ -670,125 +675,20 @@ export async function getAccessProfileByEmail(email) {
     assertNonEmptyString(normalizedEmail, "email");
 
     /*
-      El doc canónico es users/{correo en minúsculas, sin espacios}: el sync
-      de Bitácoras lo mantiene con role, active y studentIds ya fusionados.
-      Si existe, es autoritativo. El resto de búsquedas queda solo como
-      respaldo transitorio mientras se termina la limpieza de docs legados.
+      El único origen de acceso es users/{correoNormalizado}. No se buscan
+      documentos alternativos por campos ni por IDs heredados: si este documento
+      aún no existe, el frontend muestra el estado correspondiente y no escribe.
     */
     const directSnap = await getDoc(doc(db, COLLECTIONS.users, normalizedEmail));
-    if (directSnap.exists()) {
-      return normalizeAccessProfile({
-        id: directSnap.id,
-        ...directSnap.data(),
-        email: normalizedEmail,
-      });
-    }
-
-    const candidates = [];
-    const seenIds = new Set();
-
-    const addCandidate = (id, data) => {
-      if (!id || seenIds.has(id)) return;
-      seenIds.add(id);
-      candidates.push({ id, ...data });
-    };
-
-    // Por si el doc fue creado con el correo sin normalizar (mayúsculas, etc.)
-    const rawEmail = safeText(email);
-    if (rawEmail && rawEmail !== normalizedEmail) {
-      const rawSnap = await getDoc(doc(db, COLLECTIONS.users, rawEmail));
-      if (rawSnap.exists()) addCandidate(rawSnap.id, rawSnap.data());
-    }
-
-    /*
-      Consultas por campo email/correo. Si las reglas desplegadas todavía no
-      las permiten, no rompemos el login: seguimos con lo que tengamos.
-    */
-    const usersRef = collection(db, COLLECTIONS.users);
-
-    for (const field of ["email", "correo"]) {
-      try {
-        const snap = await getDocs(
-          query(usersRef, where(field, "==", normalizedEmail), limit(25))
-        );
-        snap.docs.forEach((found) => addCandidate(found.id, found.data()));
-      } catch (queryError) {
-        const code = String(queryError?.code || queryError?.message || "");
-        if (!code.includes("permission")) throw queryError;
-        console.warn(
-          `[data] Consulta de respaldo en users (${field}) bloqueada por reglas.`,
-          queryError
-        );
-      }
-    }
-
-    if (!candidates.length) return null;
-
-    const isActiveProfile = (p) =>
-      p.active !== false && p.estado !== "inactivo";
-
-    const hasLinkedStudents = (p) =>
-      (Array.isArray(p.studentIds) && p.studentIds.length > 0) ||
-      (Array.isArray(p.students) && p.students.length > 0) ||
-      Boolean(safeText(p.studentId)) ||
-      Boolean(safeText(p.studentKey)) ||
-      Boolean(safeText(p.estudianteId));
-
-    // Preferimos documentos activos; entre ellos, los que tengan estudiantes.
-    const activeOnes = candidates.filter(isActiveProfile);
-    const pool = activeOnes.length ? activeOnes : candidates;
-    const base = pool.find(hasLinkedStudents) || pool[0];
-
-    // Fusionamos los estudiantes de TODOS los docs activos del mismo correo
-    // (un acudiente puede tener un doc por cada hijo).
-    const mergedStudentIds = unique(
-      pool
-        .flatMap((p) => [
-          ...safeArray(p.studentIds),
-          ...safeArray(p.students),
-          p.studentId,
-          p.studentKey,
-          p.estudianteId,
-        ])
-        .map((id) => safeText(id))
-        .filter(Boolean)
-    );
+    if (!directSnap.exists()) return null;
 
     return normalizeAccessProfile({
-      ...base,
+      ...directSnap.data(),
+      id: directSnap.id,
       email: normalizedEmail,
-      studentIds: mergedStudentIds,
     });
   } catch (error) {
     throw withContextError(error, "getAccessProfileByEmail");
-  }
-}
-
-/*
-  Compatibilidad:
-  Antes Estudiantes HUB usaba getUserCtx(uid).
-  Ahora debería usarse getAccessProfileByEmail(email).
-*/
-export async function getUserCtx(identifier) {
-  try {
-    const value = safeText(identifier);
-    assertNonEmptyString(value, "identifier");
-
-    if (value.includes("@")) {
-      return getAccessProfileByEmail(value);
-    }
-
-    const ref = doc(db, COLLECTIONS.users, value);
-    const snap = await getDoc(ref);
-
-    return snap.exists()
-      ? normalizeAccessProfile({
-          id: snap.id,
-          ...snap.data(),
-        })
-      : null;
-  } catch (error) {
-    throw withContextError(error, "getUserCtx");
   }
 }
 
@@ -796,516 +696,7 @@ export async function getUserByEmail(email) {
   return getAccessProfileByEmail(email);
 }
 
-/*
-  Importante:
-  Esta función NO crea usuarios automáticamente.
-  Se conserva como alias seguro por compatibilidad con código viejo.
-*/
-export async function ensureUserDoc(user) {
-  try {
-    const email = normalizeEmail(user?.email);
-
-    if (!email) {
-      throw new Error("ensureUserDoc requiere user.email.");
-    }
-
-    return getAccessProfileByEmail(email);
-  } catch (error) {
-    throw withContextError(error, "ensureUserDoc");
-  }
-}
-
-export async function updateUserCtx(emailOrId, patch = {}) {
-  try {
-    // Solo se escribe el doc canónico users/{correo}; IDs no-correo crearían
-    // de nuevo los documentos duplicados que ya se migraron.
-    const id = normalizeEmail(emailOrId);
-    assertNonEmptyString(id, "emailOrId");
-    if (!id.includes("@")) {
-      throw new Error("updateUserCtx requiere un correo como identificador.");
-    }
-
-    const ref = doc(db, COLLECTIONS.users, id);
-    const cleanPatch = removeUndefinedFields({
-      ...patch,
-      updatedAt: serverTimestamp(),
-    });
-
-    await updateDoc(ref, cleanPatch);
-    return true;
-  } catch (error) {
-    throw withContextError(error, "updateUserCtx");
-  }
-}
-
-/* =============================================================================
-  ACCESO POR CORREO (SUBCORREOS / ACUDIENTES)
-
-  Permite asignar correos adicionales a un mismo proceso de estudiante desde el
-  front del HUB. Los correos iniciales siguen viniendo de Bitácoras; esto solo
-  agrega correos extra (acudiente, segundo padre/madre, etc.) que verán el mismo
-  estudiante. Cada correo se guarda como users/{correo} con su studentIds.
-============================================================================= */
-
-const LINKED_ACCESS_ROLES = ["student", "estudiante", "acudiente", "guardian", "parent"];
-
-export async function listStudentEmailAccess(studentId) {
-  try {
-    const id = safeText(studentId);
-    assertNonEmptyString(id, "studentId");
-
-    const usersRef = collection(db, COLLECTIONS.users);
-    const student = await getStudent(id).catch(() => null);
-    const aliasIds = buildStudentAliasIds(student, id);
-
-    const byEmail = new Map();
-
-    for (const part of chunk(aliasIds, MAX_IN)) {
-      if (!part.length) continue;
-
-      for (const field of ["studentIds", "students"]) {
-        try {
-          const snap = await getDocs(
-            query(usersRef, where(field, "array-contains-any", part))
-          );
-
-          snap.docs.forEach((docItem) => {
-            const data = docItem.data() || {};
-            const email = normalizeEmail(data.email || data.correo || docItem.id);
-            if (!email) return;
-
-            byEmail.set(email, {
-              email,
-              role: safeText(data.role || data.rol || "acudiente"),
-              active: data.active !== false && data.estado !== "inactivo",
-              displayName: safeText(data.displayName || data.nombre || data.name),
-              linkedFromHub: Boolean(data.linkedFromHub),
-              studentIds: unique(
-                [
-                  ...safeArray(data.studentIds),
-                  ...safeArray(data.students),
-                  safeText(data.studentId),
-                ].map((value) => safeText(value))
-              ),
-            });
-          });
-        } catch (queryError) {
-          // Índice o permisos: seguimos con lo que se pueda leer.
-          console.warn(`[data] listStudentEmailAccess (${field}) parcial.`, queryError);
-        }
-      }
-    }
-
-    return [...byEmail.values()].sort((a, b) => a.email.localeCompare(b.email, "es"));
-  } catch (error) {
-    throw withContextError(error, "listStudentEmailAccess");
-  }
-}
-
-export async function addStudentEmailAccess(studentId, email, meta = {}) {
-  try {
-    const id = safeText(studentId);
-    assertNonEmptyString(id, "studentId");
-
-    const cleanEmail = normalizeEmail(email);
-    assertNonEmptyString(cleanEmail, "email");
-    if (!cleanEmail.includes("@") || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
-      throw new Error("El correo no es válido.");
-    }
-
-    const ref = doc(db, COLLECTIONS.users, cleanEmail);
-    const snap = await getDoc(ref);
-    const existing = snap.exists() ? snap.data() || {} : {};
-    const student =
-      meta.student && typeof meta.student === "object"
-        ? meta.student
-        : await getStudent(id).catch(() => null);
-    const aliasIds = buildStudentAliasIds(student, id);
-
-    const mergedStudentIds = unique(
-      [
-        ...safeArray(existing.studentIds),
-        ...safeArray(existing.students),
-        safeText(existing.studentId),
-        safeText(existing.studentKey),
-        safeText(existing.estudianteId),
-        ...aliasIds,
-      ].map((value) => safeText(value))
-    );
-
-    const existingRole = safeText(existing.role || existing.rol).toLowerCase();
-    const role = LINKED_ACCESS_ROLES.includes(existingRole)
-      ? existingRole
-      : safeText(meta.role).toLowerCase() || "acudiente";
-
-    const payload = removeUndefinedFields({
-      email: cleanEmail,
-      role,
-      active: true,
-      studentIds: mergedStudentIds,
-      students: mergedStudentIds,
-      studentId: safeText(existing.studentId) || id,
-      displayName: safeText(existing.displayName) || safeText(meta.displayName) || "",
-      source: safeText(existing.source) || "estudiantes-hub",
-      linkedFromHub: true,
-      linkedBy: safeText(meta.actorEmail) || safeText(existing.linkedBy) || "",
-      updatedAt: serverTimestamp(),
-      ...(snap.exists() ? {} : { createdAt: serverTimestamp() }),
-    });
-
-    await setDoc(ref, payload, { merge: true });
-
-    return { email: cleanEmail, role, studentIds: mergedStudentIds };
-  } catch (error) {
-    throw withContextError(error, "addStudentEmailAccess");
-  }
-}
-
-/*
-  Repara accesos creados antes de que el HUB conociera todas las llaves del
-  estudiante. Conserva los vínculos actuales y agrega los alias que Bitácoras
-  puede haber usado (id, studentId, studentKey, documento y duplicados).
-*/
-export async function repairStudentEmailAccess(studentId, options = {}) {
-  try {
-    const id = safeText(studentId);
-    assertNonEmptyString(id, "studentId");
-
-    const student =
-      options.student && typeof options.student === "object"
-        ? options.student
-        : await getStudent(id).catch(() => null);
-    const aliasIds = buildStudentAliasIds(student, id);
-    const accessRows = await listStudentEmailAccess(id);
-    let repaired = 0;
-
-    for (const access of accessRows) {
-      const email = normalizeEmail(access?.email);
-      if (!email) continue;
-
-      const currentIds = unique(
-        [
-          ...safeArray(access.studentIds),
-          ...safeArray(access.students),
-          safeText(access.studentId),
-          safeText(access.studentKey),
-          safeText(access.estudianteId),
-        ].map((value) => safeText(value))
-      );
-      const mergedIds = unique([...currentIds, ...aliasIds]);
-
-      if (
-        mergedIds.length === currentIds.length &&
-        access.active !== false
-      ) {
-        continue;
-      }
-
-      await setDoc(
-        doc(db, COLLECTIONS.users, email),
-        {
-          email,
-          active: true,
-          studentIds: mergedIds,
-          students: mergedIds,
-          studentId: safeText(access.studentId) || mergedIds[0] || "",
-          repairedFromHub: true,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      repaired += 1;
-    }
-
-    return { repaired, aliases: aliasIds, accessCount: accessRows.length };
-  } catch (error) {
-    throw withContextError(error, "repairStudentEmailAccess");
-  }
-}
-
-export async function auditStudentEmailAccess(studentId, options = {}) {
-  try {
-    const id = safeText(studentId);
-    assertNonEmptyString(id, "studentId");
-
-    const student =
-      options.student && typeof options.student === "object"
-        ? options.student
-        : await getStudent(id).catch(() => null);
-    const aliasIds = buildStudentAliasIds(student, id);
-    const requiredIds = new Set(aliasIds);
-    const accessRows = await listStudentEmailAccess(id);
-    const bitacoras = await listBitacorasByStudent(id, {
-      student,
-      aliasIds,
-      max: 200,
-    });
-    const allowedRoles = new Set(LINKED_ACCESS_ROLES);
-    const rows = [];
-
-    for (const listed of accessRows) {
-      const email = normalizeEmail(listed?.email);
-      if (!email) continue;
-
-      const canonicalSnap = await getDoc(doc(db, COLLECTIONS.users, email));
-      const canonical = canonicalSnap.exists() ? canonicalSnap.data() || {} : null;
-      const role = safeText(canonical?.role || canonical?.rol || listed.role).toLowerCase();
-      const active =
-        canonical !== null &&
-        canonical.active !== false &&
-        canonical.estado !== "inactivo";
-      const linkedIds = unique(
-        [
-          ...safeArray(canonical?.studentIds),
-          ...safeArray(canonical?.students),
-          canonical?.studentId,
-          canonical?.studentKey,
-          canonical?.estudianteId,
-        ].map((value) => safeText(value))
-      );
-      const linkedSet = new Set(linkedIds);
-      const missingIds = [...requiredIds].filter((aliasId) => !linkedSet.has(aliasId));
-      const visibleBitacoras = bitacoras.filter((item) => {
-        const itemIds = unique(
-          [
-            ...safeArray(item.studentIds),
-            item.studentId,
-            item.studentKey,
-            item.estudianteId,
-          ].map((value) => safeText(value))
-        );
-        return itemIds.some((itemId) => linkedSet.has(itemId));
-      }).length;
-      const issues = [];
-
-      if (!canonical) issues.push("Falta users/{correo}");
-      if (!active) issues.push("Acceso inactivo");
-      if (!allowedRoles.has(role)) issues.push("Rol no permitido");
-      if (missingIds.length) issues.push(`${missingIds.length} identificador(es) sin vincular`);
-      if (visibleBitacoras < bitacoras.length) {
-        issues.push(`${bitacoras.length - visibleBitacoras} bitácora(s) no visibles`);
-      }
-
-      rows.push({
-        email,
-        role: role || "(sin rol)",
-        active,
-        visibleBitacoras,
-        totalBitacoras: bitacoras.length,
-        ok: issues.length === 0,
-        issues,
-      });
-    }
-
-    return {
-      ok: rows.length > 0 && rows.every((row) => row.ok),
-      totalBitacoras: bitacoras.length,
-      rows,
-    };
-  } catch (error) {
-    throw withContextError(error, "auditStudentEmailAccess");
-  }
-}
-
-/*
-  Auditoría GLOBAL de acceso a bitácoras (solo sesión admin).
-
-  Recorre TODOS los perfiles de users/ con rol estudiante/acudiente y calcula,
-  con la MISMA lógica que aplican las reglas de Firestore (studentIds del
-  perfil vs. llaves guardadas en cada bitácora), cuántas bitácoras puede leer
-  realmente esa cuenta. Con repair=true agrega al perfil las llaves que
-  falten, que es la reparación mínima para que todo quede visible.
-
-  Importante: aquí se comparan los CAMPOS CRUDOS del documento (studentIds /
-  studentId / students), que es exactamente lo que evalúan las reglas; no la
-  versión normalizada que usa la UI.
-*/
-export async function auditAllBitacoraAccess(options = {}) {
-  try {
-    const repair = options.repair === true;
-    const allowedRoles = new Set(LINKED_ACCESS_ROLES);
-    const bitacorasRef = collection(db, COLLECTIONS.bitacoras);
-
-    const usersSnap = await getDocs(collection(db, COLLECTIONS.users));
-    const rows = [];
-
-    const auditOne = async (userDoc) => {
-      const data = userDoc.data() || {};
-      const email = normalizeEmail(data.email || data.correo || userDoc.id);
-      const role = safeText(data.role || data.rol).toLowerCase();
-
-      if (!email || !allowedRoles.has(role)) return null;
-
-      const active = data.active !== false && data.estado !== "inactivo";
-
-      /*
-        Llaves vinculadas EXACTAMENTE como las resuelven las reglas
-        (linkedStudentIds): studentIds si es lista; si no, students; si no,
-        la primera llave simple disponible.
-      */
-      const singleId =
-        safeText(data.studentId) ||
-        safeText(data.studentKey) ||
-        safeText(data.estudianteId);
-      const linkedIds = Array.isArray(data.studentIds)
-        ? unique(data.studentIds.map((value) => safeText(value)))
-        : Array.isArray(data.students)
-          ? unique(data.students.map((value) => safeText(value)))
-          : singleId
-            ? [singleId]
-            : [];
-
-      if (!linkedIds.length) {
-        return {
-          email, role, active,
-          total: 0, visibles: 0,
-          ok: false, issue: "Sin estudiantes vinculados", repaired: false,
-        };
-      }
-
-      // Todos los alias conocidos del/los estudiante(s) de este perfil.
-      const aliasSets = await Promise.all(
-        linkedIds.map((linkedId) => resolveStudentAliasIds(linkedId, {}))
-      );
-      const aliasIds = unique(aliasSets.flat());
-
-      // Bitácoras reales (docs crudos) alcanzables con cualquier alias.
-      const rawById = new Map();
-      const collectRaw = (snap) => {
-        for (const item of snap.docs) rawById.set(item.id, item.data() || {});
-      };
-
-      for (const part of chunk(aliasIds, MAX_IN)) {
-        if (!part.length) continue;
-        collectRaw(await getDocs(
-          query(bitacorasRef, where("studentIds", "array-contains-any", part))
-        ));
-      }
-      for (const aliasId of aliasIds) {
-        collectRaw(await getDocs(
-          query(bitacorasRef, where("studentId", "==", aliasId))
-        ));
-      }
-
-      const linkedSet = new Set(linkedIds);
-      const canSee = (raw) =>
-        (Array.isArray(raw.studentIds) &&
-          raw.studentIds.some((value) => linkedSet.has(safeText(value)))) ||
-        (typeof raw.studentId === "string" && linkedSet.has(safeText(raw.studentId)));
-
-      const rawDocs = [...rawById.values()];
-      let visibles = rawDocs.filter(canSee).length;
-      let repaired = false;
-
-      if (repair && visibles < rawDocs.length) {
-        const missingKeys = unique(
-          rawDocs
-            .filter((raw) => !canSee(raw))
-            .flatMap((raw) => [...safeArray(raw.studentIds), raw.studentId])
-            .map((value) => safeText(value))
-        );
-        const merged = unique([...linkedIds, ...missingKeys]);
-
-        await setDoc(
-          doc(db, COLLECTIONS.users, email),
-          {
-            email,
-            studentIds: merged,
-            students: merged,
-            repairedFromHub: true,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        repaired = true;
-        for (const key of merged) linkedSet.add(key);
-        visibles = rawDocs.filter(canSee).length;
-      }
-
-      return {
-        email, role, active,
-        total: rawDocs.length,
-        visibles,
-        ok: active && visibles === rawDocs.length,
-        issue: !active
-          ? "Acceso inactivo"
-          : visibles < rawDocs.length
-            ? `${rawDocs.length - visibles} bitácora(s) fuera de alcance`
-            : "",
-        repaired,
-      };
-    };
-
-    // Lotes pequeños para no saturar Firestore desde el navegador.
-    for (const part of chunk(usersSnap.docs, 5)) {
-      const settled = await Promise.all(
-        part.map((userDoc) => auditOne(userDoc).catch((error) => {
-          console.warn("[data] auditAllBitacoraAccess: perfil con error.", userDoc.id, error);
-          return {
-            email: normalizeEmail(userDoc.id),
-            role: "(error)", active: false,
-            total: 0, visibles: 0,
-            ok: false, issue: safeText(error?.message, "Error"), repaired: false,
-          };
-        }))
-      );
-      rows.push(...settled.filter(Boolean));
-    }
-
-    rows.sort((a, b) =>
-      Number(a.ok) - Number(b.ok) || a.email.localeCompare(b.email, "es")
-    );
-
-    return {
-      ok: rows.length > 0 && rows.every((row) => row.ok),
-      totalUsers: rows.length,
-      issues: rows.filter((row) => !row.ok).length,
-      rows,
-    };
-  } catch (error) {
-    throw withContextError(error, "auditAllBitacoraAccess");
-  }
-}
-
-export async function removeStudentEmailAccess(email, studentId) {
-  try {
-    const cleanEmail = normalizeEmail(email);
-    assertNonEmptyString(cleanEmail, "email");
-
-    const id = safeText(studentId);
-    const ref = doc(db, COLLECTIONS.users, cleanEmail);
-    const snap = await getDoc(ref);
-
-    if (!snap.exists()) return true;
-
-    const data = snap.data() || {};
-    const remaining = unique(
-      [
-        ...safeArray(data.studentIds),
-        ...safeArray(data.students),
-        safeText(data.studentId),
-      ].map((value) => safeText(value))
-    ).filter((sid) => sid && sid !== id);
-
-    await updateDoc(
-      ref,
-      removeUndefinedFields({
-        studentIds: remaining,
-        students: remaining,
-        studentId: remaining[0] || "",
-        // Si ya no le queda ningún estudiante vinculado, desactivamos el acceso.
-        active: remaining.length ? data.active !== false : false,
-        updatedAt: serverTimestamp(),
-      })
-    );
-
-    return true;
-  } catch (error) {
-    throw withContextError(error, "removeStudentEmailAccess");
-  }
-}
-
+/* La identidad se prepara exclusivamente en backends autorizados. */
 /* =============================================================================
   STUDENTS
 ============================================================================= */
@@ -1343,12 +734,39 @@ export async function getStudentsByIds(studentIds = []) {
     const parts = chunk(ids, MAX_IN);
     const studentsRef = collection(db, COLLECTIONS.students);
 
-    for (const part of parts) {
-      const q = query(studentsRef, where(documentId(), "in", part));
-      const snap = await getDocs(q);
+    try {
+      for (const part of parts) {
+        const q = query(studentsRef, where(documentId(), "in", part));
+        const snap = await getDocs(q);
+
+        out.push(
+          ...docsToObjects(snap).map((item) => normalizeStudent(item))
+        );
+      }
+    } catch (error) {
+      if (!isPermissionError(error)) throw error;
+
+      console.warn(
+        "[data] getStudentsByIds agrupado bloqueado por reglas. Usando lecturas individuales.",
+        error
+      );
+
+      const settled = await Promise.allSettled(
+        ids.map(async (id) => {
+          const snap = await getDoc(doc(db, COLLECTIONS.students, id));
+          return snap.exists()
+            ? normalizeStudent({
+                id: snap.id,
+                ...snap.data(),
+              })
+            : null;
+        })
+      );
 
       out.push(
-        ...docsToObjects(snap).map((item) => normalizeStudent(item))
+        ...settled
+          .filter((item) => item.status === "fulfilled" && item.value)
+          .map((item) => item.value)
       );
     }
 
@@ -1401,7 +819,10 @@ export async function listAllStudents(max = 0) {
     const snap = await getDocs(q);
 
     const deduped = dedupeStudents(
-      docsToObjects(snap).map((item) => normalizeStudent(item)),
+      docsToObjects(snap)
+        // Docs marcados como alias de un canónico: no son estudiantes extra.
+        .filter((item) => !safeText(item.legacyAliasOf))
+        .map((item) => normalizeStudent(item)),
       { debug: Boolean(globalThis?.MUSICALA_DEBUG_STUDENTS) }
     );
 
@@ -2864,105 +2285,6 @@ function isResourceVisibleForStudent(resource, ctx) {
 
   return resourceMatchesStudent(resource, ctx.student);
 }
-
-/*
-  Ajusta manualmente (solo admin) la visibilidad de UN recurso para UN estudiante,
-  por encima del preset automático por arte/instrumento.
-    setStudentResourceVisibility(studentId, resourceId, true)  -> mostrar
-    setStudentResourceVisibility(studentId, resourceId, false) -> ocultar
-  Mantiene dos listas en el documento del estudiante:
-    extraResourceIds    (asignados / "poner")
-    excludedResourceIds (ocultos / "quitar")
-*/
-export async function setStudentResourceVisibility(studentId, resourceId, visible = true) {
-  try {
-    const id = safeText(studentId);
-    assertNonEmptyString(id, "studentId");
-
-    const rid = safeText(resourceId);
-    assertNonEmptyString(rid, "resourceId");
-
-    const ref = doc(db, COLLECTIONS.students, id);
-    const snap = await getDoc(ref);
-    const existing = snap.exists() ? snap.data() || {} : {};
-
-    const cleanList = (...sources) =>
-      unique(
-        sources
-          .flatMap((source) => safeArray(source))
-          .map((value) => safeText(value))
-          .filter(Boolean)
-      );
-
-    let extra = cleanList(existing.extraResourceIds, existing.recursosAsignados);
-    let excluded = cleanList(existing.excludedResourceIds, existing.recursosOcultos);
-
-    if (visible) {
-      // Mostrar: lo añadimos a "asignados" y lo sacamos de "ocultos".
-      extra = unique([...extra, rid]);
-      excluded = excluded.filter((value) => value !== rid);
-    } else {
-      // Ocultar: lo sacamos de "asignados" y lo añadimos a "ocultos".
-      extra = extra.filter((value) => value !== rid);
-      excluded = unique([...excluded, rid]);
-    }
-
-    await setDoc(
-      ref,
-      removeUndefinedFields({
-        extraResourceIds: extra,
-        recursosAsignados: extra,
-        excludedResourceIds: excluded,
-        recursosOcultos: excluded,
-        updatedAt: serverTimestamp(),
-      }),
-      { merge: true }
-    );
-
-    return { extraResourceIds: extra, excludedResourceIds: excluded };
-  } catch (error) {
-    throw withContextError(error, "setStudentResourceVisibility");
-  }
-}
-
-/* Compatibilidad: asignar = mostrar; quitar = ocultar. */
-export async function assignResourceToStudent(studentId, resourceId, assign = true) {
-  return setStudentResourceVisibility(studentId, resourceId, assign);
-}
-
-export async function unassignResourceFromStudent(studentId, resourceId) {
-  return setStudentResourceVisibility(studentId, resourceId, false);
-}
-
-/*
-  Activa/desactiva el modo "ver toda la biblioteca sin filtro" para un estudiante.
-  Uso (solo admin): setStudentShowAllResources(studentId, true|false)
-*/
-export async function setStudentShowAllResources(studentId, showAll = true) {
-  try {
-    const id = safeText(studentId);
-    assertNonEmptyString(id, "studentId");
-
-    const value = Boolean(showAll);
-
-    const ref = doc(db, COLLECTIONS.students, id);
-
-    await setDoc(
-      ref,
-      removeUndefinedFields({
-        showAllResources: value,
-        verTodosLosRecursos: value,
-        updatedAt: serverTimestamp(),
-      }),
-      { merge: true }
-    );
-
-    return value;
-  } catch (error) {
-    throw withContextError(error, "setStudentShowAllResources");
-  }
-}
-
 export async function listResources(options = {}) {
   try {
     const {
@@ -3735,26 +3057,16 @@ function normalizeMessage(raw = null) {
   };
 }
 
-const FALLBACK_TEACHERS = Object.freeze([
-  { email: "alekcaballeromusic@gmail.com", name: "Alek Caballero" },
-  { email: "catalina.medina.leal@gmail.com", name: "Catalina Medina" },
-  { email: "emilybg0102@gmail.com", name: "Emily Bejarano" },
-  { email: "annitolad@gmail.com", name: "Angie Nitola" },
-  { email: "lorenaduarte.404@gmail.com", name: "Laura Sánchez" },
-  { email: "malego2709@gmail.com", name: "María Alejandra Gómez" },
-  { email: "tiritiri.riri@gmail.com", name: "Isabel Gómez Gómez" },
-  { email: "darasaxcifuentes@gmail.com", name: "Dara Natalia Cifuentes Rojas" },
-]);
-
 export async function listMessageTeachers() {
   try {
     const snap = await getDocs(query(collection(teachersHubDb, "teacherDirectory"), orderBy("name", "asc")));
     const rows = docsToObjects(snap)
       .filter((item) => item.enabled !== false && safeText(item.email))
       .map((item) => ({ email: safeText(item.email).toLowerCase(), name: safeText(item.name || item.label || item.email) }));
-    return rows.length ? rows : [...FALLBACK_TEACHERS];
-  } catch (_) {
-    return [...FALLBACK_TEACHERS];
+    return rows;
+  } catch (error) {
+    console.warn("[data] No se pudo consultar el directorio docente.", error);
+    return [];
   }
 }
 

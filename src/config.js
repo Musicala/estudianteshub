@@ -43,8 +43,8 @@ export const APP_META = Object.freeze({
   name: "Estudiantes HUB · Musicala",
   shortName: "Estudiantes HUB",
   institution: "Musicala",
-  version: "1.0.0",
-  build: "2026.05.estudiantes-hub.v2-musiprofe-rutina",
+  version: "1.0.1",
+  build: "2026-07-13.1-identidad-canonica-readonly",
   lang: "es-CO",
   defaultRoute: "home",
 });
@@ -294,58 +294,77 @@ export const ROUTE_DESCRIPTIONS = Object.freeze({
 
 export const ROLES = Object.freeze({
   admin: "admin",
+  administrator: "administrator",
+  administratorEs: "administrador",
+  administratorEsFemale: "administradora",
+  administrativeEn: "administrative",
   direction: "direccion",
+  directionEn: "direction",
   administrative: "administrativo",
+  administrativeEsFemale: "administrativa",
   teacher: "teacher",
   teacherEs: "docente",
+  teacherEsAlt: "profesor",
+  teacherEsFemale: "profesora",
   student: "student",
   studentEs: "estudiante",
+  guardian: "guardian",
+  guardianEs: "acudiente",
+  parent: "parent",
 });
 
 export const ROLE_GROUPS = Object.freeze({
   admins: Object.freeze([
     ROLES.admin,
+    ROLES.administrator,
+    ROLES.administratorEs,
+    ROLES.administratorEsFemale,
+    ROLES.administrativeEn,
     ROLES.direction,
+    ROLES.directionEn,
     "dirección",
     ROLES.administrative,
+    ROLES.administrativeEsFemale,
   ]),
 
   teachers: Object.freeze([
     ROLES.teacher,
     ROLES.teacherEs,
+    ROLES.teacherEsAlt,
+    ROLES.teacherEsFemale,
   ]),
-
   students: Object.freeze([
     ROLES.student,
     ROLES.studentEs,
+    ROLES.guardian,
+    ROLES.guardianEs,
+    ROLES.parent,
   ]),
 
   portalAllowed: Object.freeze([
     ROLES.admin,
+    ROLES.administrator,
+    ROLES.administratorEs,
+    ROLES.administratorEsFemale,
+    ROLES.administrativeEn,
     ROLES.direction,
+    ROLES.directionEn,
     "dirección",
     ROLES.administrative,
+    ROLES.administrativeEsFemale,
     ROLES.teacher,
     ROLES.teacherEs,
+    ROLES.teacherEsAlt,
+    ROLES.teacherEsFemale,
     ROLES.student,
     ROLES.studentEs,
+    ROLES.guardian,
+    ROLES.guardianEs,
+    ROLES.parent,
   ]),
 });
 
 export const ACCESS_CONFIG = Object.freeze({
-  /*
-    Estos correos NO reemplazan las reglas de Firestore.
-    Solo sirven como referencia visual/config de app.
-    La seguridad real vive en firestore.rules.
-  */
-  bootstrapAdminEmails: Object.freeze([
-    "alekcaballeromusic@gmail.com",
-    "catalina.medina.leal@gmail.com",
-    "imusicala@gmail.com",
-    "adminmusicala@gmail.com",
-    "musicalaasesor@gmail.com",
-  ]),
-
   requireActiveUser: true,
   requireLinkedStudent: true,
 });
