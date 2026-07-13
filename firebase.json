@@ -8,6 +8,13 @@
     "ignore": [
       "firebase.json",
       ".firebaserc",
+      ".git",
+      ".git/**",
+      ".gitignore",
+      ".vscode",
+      ".vscode/**",
+      ".firebase",
+      ".firebase/**",
       "**/.*",
       "**/node_modules/**",
       "**/*.md",
