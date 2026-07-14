@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-13.2-resolucion-identidad-logica",
+  build: "2026-07-13.3-correccion-correos-vinculados",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -470,8 +470,6 @@ function cacheStudent(student = null) {
     student.email,
     student.correo,
     student.studentEmail,
-    state.accessProfile?.email,
-    state.accessProfile?.correo,
   ]
     .map((email) => normalizeEmail(email))
     .filter(Boolean)
