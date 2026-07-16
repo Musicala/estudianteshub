@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-13.3-correccion-correos-vinculados",
+  build: "2026-07-16.1-obras-compartidas",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -71,6 +71,7 @@ const APP = Object.freeze({
   routes: Object.freeze([
     "home",
     "route",
+    "works",
     "journal",
     "resources",
     "events",
@@ -86,6 +87,7 @@ const APP = Object.freeze({
   routeAliases: Object.freeze({
     inicio: "home",
     ruta: "route",
+    obras: "works",
     bitacora: "journal",
     bitácora: "journal",
     recursos: "resources",

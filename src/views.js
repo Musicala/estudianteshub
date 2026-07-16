@@ -722,6 +722,13 @@ async function renderHome(deps) {
     }),
   });
 
+  const worksCard = card({
+    title: "Obras del proceso",
+    subtitle: "Las obras que quieres trabajar, estás trabajando o ya lograste.",
+    bodyHTML: `<p class="note">Incluye también tus sugerencias para que tu docente las revise.</p>`,
+    footerHTML: button("Ver mis obras", { variant: "ghost", route: "works", icon: "♪" }),
+  });
+
   const stats = grid(
     `
       ${renderMiniStat("Bitácoras", bitacoras.length, "soft")}
@@ -799,7 +806,8 @@ async function renderHome(deps) {
       ${badgesCard}
       <div class="split">
         <div class="stack">
-          ${routeCard}
+      ${routeCard}
+      ${worksCard}
           ${lastBitacoraCard}
         </div>
 
@@ -3698,6 +3706,41 @@ async function renderReport(deps) {
   return { html, afterRender: () => wireReportView(deps, student, studentId) };
 }
 
+function normalizedWorks(student = {}) {
+  const raw = student.repertorioProceso || student.repertoireProgress || student.repertorioEscogido || student.repertoire || [];
+  return (Array.isArray(raw) ? raw : [raw]).map((item) => ({
+    nombre: uiSafeText(typeof item === "object" ? item.nombre || item.name || item.title : item),
+    estado: uiSafeText(item?.estado || item?.status || "proceso").toLowerCase(),
+  })).filter((item) => item.nombre);
+}
+
+async function renderWorks(deps) {
+  const ctx = getCtx(deps);
+  const api = getApi(deps);
+  const student = getStudent(ctx);
+  const studentId = getStudentId(ctx);
+  const works = normalizedWorks(student);
+  const suggestions = await api.listStudentWorkSuggestions?.(studentId).catch(() => []) || [];
+  const columns = [
+    ["quiere", "Quiero trabajar"], ["proceso", "Estoy trabajando"], ["lograda", "Lograda"],
+  ];
+  const columnHtml = columns.map(([key, label]) => {
+    const items = works.filter((item) => item.estado === key);
+    return `<section class="card card--flat"><h3>${label} <span class="chip chip--soft">${items.length}</span></h3>${items.length ? `<div class="list">${items.map((item) => itemRow({ title: item.nombre, icon: "♪" })).join("")}</div>` : `<p class="note">Aún no hay obras en esta etapa.</p>`}</section>`;
+  }).join("");
+  const html = `${viewHeader("Obras del proceso", studentSubtitle(ctx), { eyebrow: "Mi proceso" })}${stack(`
+    <p class="note">Aquí ves las obras acordadas con tu docente. Puedes sugerir una nueva para que la revise antes de incorporarla al proceso.</p>
+    <div class="grid">${columnHtml}</div>
+    ${card({ title: "Sugeridas por mí", subtitle: "Tus propuestas pendientes de revisión.", bodyHTML: suggestions.length ? `<div class="list">${suggestions.map((item) => itemRow({ title: uiSafeText(item.nombre), meta: item.estado === "pendiente" ? "Pendiente de revisión" : uiSafeText(item.estado), icon: "✦" })).join("")}</div>` : `<p class="note">Todavía no has sugerido una obra.</p>`, footerHTML: `<div class="stack" style="gap:8px"><input id="workSuggestionName" class="field__input" maxlength="300" placeholder="Nombre de la obra"/><textarea id="workSuggestionNotes" class="field__input" rows="2" maxlength="1000" placeholder="Cuéntale brevemente por qué te interesa (opcional)"></textarea><button type="button" id="workSuggestionSave" class="btn btn--primary">Sugerir obra</button></div>` })}
+  `)}`;
+  return { html, afterRender: () => document.getElementById("workSuggestionSave")?.addEventListener("click", async () => {
+    const button = document.getElementById("workSuggestionSave");
+    try { button.disabled = true; await api.createStudentWorkSuggestion(studentId, student, { nombre: document.getElementById("workSuggestionName")?.value, notas: document.getElementById("workSuggestionNotes")?.value }); window.location.hash = "#/works"; }
+    catch (error) { window.alert(error?.message || "No se pudo enviar la sugerencia."); }
+    finally { button.disabled = false; }
+  }) };
+}
+
 /* =============================================================================
   Public API
 ============================================================================= */
@@ -3716,6 +3759,9 @@ export async function renderRoute(route, deps = {}) {
 
       case "route":
         return renderRouteView(deps);
+
+      case "works":
+        return renderWorks(deps);
 
       case "journal":
         return renderJournal(deps);

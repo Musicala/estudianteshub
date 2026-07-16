@@ -727,6 +727,35 @@ export async function getStudentById(studentId) {
   return getStudent(studentId);
 }
 
+// Sugerencias separadas de las obras oficiales: un estudiante nunca reescribe
+// la lista pedagógica completa mientras el docente la está actualizando.
+export async function listStudentWorkSuggestions(studentId, max = 40) {
+  const id = safeText(studentId);
+  if (!id) return [];
+  const snap = await getDocs(query(
+    collection(db, "student_work_suggestions"),
+    where("studentId", "==", id),
+    limit(Math.min(Math.max(Number(max) || 40, 1), 100))
+  ));
+  return docsToObjects(snap);
+}
+
+export async function createStudentWorkSuggestion(studentId, student, payload = {}) {
+  const id = safeText(studentId);
+  const nombre = safeText(payload.nombre || payload.title).slice(0, 300);
+  if (!id || !nombre) throw new Error("Escribe el nombre de la obra que quieres sugerir.");
+  const ref = await addDoc(collection(db, "student_work_suggestions"), {
+    studentId: id,
+    studentName: safeText(student?.nombre || student?.name || "Estudiante").slice(0, 160),
+    nombre,
+    notas: safeText(payload.notas || payload.notes).slice(0, 1000),
+    estado: "pendiente",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return { id: ref.id, studentId: id, nombre, estado: "pendiente" };
+}
+
 export async function getStudentsByIds(studentIds = []) {
   try {
     const ids = unique(safeArray(studentIds).map((id) => safeText(id)));
