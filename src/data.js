@@ -774,18 +774,24 @@ export async function revokeManagedPortalAccess(email, studentId) {
     const existing = await getAccessProfileByEmail(normalizedEmail);
     if (!existing) return false;
 
+    // Un estudiante puede estar representado por correo, id histórico y
+    // studentKey. Revocar sólo el id visible dejaba un alias autorizado y el
+    // estudiante seguía apareciendo en el selector.
+    const student = await getStudent(id).catch(() => null);
+    const accessAliases = buildStudentAliasIds(student, id);
+
     const remaining = unique([
       ...safeArray(existing.studentIds),
       existing.studentId,
       ...safeArray(existing.students),
-    ].map((value) => safeText(value))).filter((linkedId) => linkedId !== id);
+    ].map((value) => safeText(value))).filter((linkedId) => !accessAliases.includes(linkedId));
 
     const profileRef = doc(db, COLLECTIONS.users, normalizedEmail);
     if (!remaining.length && existing.portalAccessManaged === true) {
       await deleteDoc(profileRef);
     } else {
       await updateDoc(profileRef, {
-        studentIds: arrayRemove(id),
+        studentIds: arrayRemove(...accessAliases),
         updatedAt: serverTimestamp(),
       });
     }
