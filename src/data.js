@@ -2186,6 +2186,19 @@ function getStudentAreas(student) {
   return unique(collectStudentResourceTerms(student));
 }
 
+function getStudentResourceArts(student = null) {
+  const arts = detectArts(getStudentAreas(student));
+  // Los campos principales (area/programa) suelen conservar el primer proceso.
+  // Para estudiantes multiárea, la declaración directa de cada proceso manda.
+  for (const process of Array.isArray(student?.processes) ? student.processes : []) {
+    [process?.arte, process?.area, process?.label, process?.detalle]
+      .map(detectArtFromTerm)
+      .filter(Boolean)
+      .forEach((art) => arts.add(art));
+  }
+  return arts;
+}
+
 /*
   Especialidades "comunes" a toda una disciplina: un estudiante las ve aunque su
   instrumento no coincida (teoría/lenguaje musical, lectura, ritmo, material
@@ -2220,7 +2233,7 @@ function cleanResourceMatch(resource, student) {
   const studentAreas = getStudentAreas(student);
   if (!studentAreas.length) return true; // sin datos del estudiante -> mostrar
 
-  const studentArts = detectArts(studentAreas);
+  const studentArts = getStudentResourceArts(student);
   const resourceArt = detectArtFromTerm(disciplina) || disciplina;
   if (studentArts.size && !studentArts.has(resourceArt)) return false;
 
