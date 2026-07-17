@@ -715,9 +715,6 @@ export async function listManagedPortalAccesses(studentId) {
       // Incluye los accesos administrados por esta versión y los que el HUB
       // anterior ya había reparado/vinculado. Así no parecen "vacíos" ni
       // se intenta crear de nuevo un correo que ya tiene acceso.
-      .filter((profile) =>
-        profile.portalAccessManaged === true || profile.linkedFromHub === true
-      )
       .sort((a, b) => a.email.localeCompare(b.email, "es"));
   } catch (error) {
     throw withContextError(error, "listManagedPortalAccesses");
