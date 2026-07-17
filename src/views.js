@@ -67,6 +67,7 @@ import {
   getStudentDisplayName,
   getStudentSubtitle,
   getStudentProfileRows,
+  normalizeStudentProcesses,
   safeArray,
   toDateMaybe,
 } from "./normalizers.js";
@@ -1514,6 +1515,7 @@ async function renderJournal(deps) {
   }
 
   const bitacoras = normalizeBitacoras(rows);
+  const processes = normalizeStudentProcesses(student);
 
   if (!bitacoras.length) {
     const emptyMessage = journalError
@@ -1575,6 +1577,14 @@ async function renderJournal(deps) {
         />
       </label>
 
+      ${processes.length > 1 ? `<label class="journal-search__select-wrap" for="journalProcessFilter">
+        <span class="sr-only">Proceso</span>
+        <select id="journalProcessFilter" class="journal-search__select" data-journal-process>
+          <option value="">Todos los procesos</option>
+          ${processes.map((process) => `<option value="${escapeAttr(process.processKey)}">${escapeHtml(process.label || process.detalle || process.arte || "Proceso")}</option>`).join("")}
+        </select>
+      </label>` : ""}
+
       <label class="journal-search__select-wrap" for="journalCategoryFilter">
         <span class="sr-only">Categoría</span>
         <select id="journalCategoryFilter" class="journal-search__select" data-journal-category>
@@ -1606,6 +1616,7 @@ async function renderJournal(deps) {
     const searchText = getBitacoraSearchText(item);
     const sectionFilters = getBitacoraSectionLabels(content).map(normalizeSearchText).join(" ");
     const monthKey = getBitacoraMonthKey(date);
+    const processKey = getBitacoraProcessKeyForStudent(item, student, studentId);
 
     return `
       <article
@@ -1614,6 +1625,7 @@ async function renderJournal(deps) {
         data-journal-search-text="${escapeAttr(searchText)}"
         data-journal-categories="${escapeAttr(sectionFilters)}"
         data-journal-month="${escapeAttr(monthKey)}"
+        data-journal-process="${escapeAttr(processKey)}"
       >
         <div class="journal-card__top">
           <div>
@@ -1686,26 +1698,30 @@ function wireJournalSearch() {
   const input = root.querySelector("[data-journal-search]");
   const category = root.querySelector("[data-journal-category]");
   const month = root.querySelector("[data-journal-month]");
+  const process = root.querySelector("[data-journal-process]");
   const entries = Array.from(root.querySelectorAll("[data-journal-entry]"));
   const status = root.querySelector("[data-journal-status]");
   const empty = root.querySelector("[data-journal-empty]");
 
-  if (!entries.length || (!input && !category && !month)) return;
+  if (!entries.length || (!input && !category && !month && !process)) return;
 
   const applyFilters = () => {
     const query = normalizeSearchText(input?.value || "");
     const categoryValue = category?.value || "";
     const monthValue = month?.value || "";
+    const processValue = process?.value || "";
     let visible = 0;
 
     entries.forEach((entry) => {
       const text = entry.getAttribute("data-journal-search-text") || "";
       const categories = entry.getAttribute("data-journal-categories") || "";
       const entryMonth = entry.getAttribute("data-journal-month") || "";
+      const entryProcess = entry.getAttribute("data-journal-process") || "";
       const matchesQuery = !query || text.includes(query);
       const matchesCategory = !categoryValue || categories.includes(categoryValue);
       const matchesMonth = !monthValue || entryMonth === monthValue;
-      const shouldShow = matchesQuery && matchesCategory && matchesMonth;
+      const matchesProcess = !processValue || entryProcess === processValue;
+      const shouldShow = matchesQuery && matchesCategory && matchesMonth && matchesProcess;
 
       entry.hidden = !shouldShow;
       if (shouldShow) visible += 1;
@@ -1723,7 +1739,27 @@ function wireJournalSearch() {
   input?.addEventListener("input", applyFilters);
   category?.addEventListener("change", applyFilters);
   month?.addEventListener("change", applyFilters);
+  process?.addEventListener("change", applyFilters);
   applyFilters();
+}
+
+function getBitacoraProcessKeyForStudent(item = {}, student = {}, studentId = "") {
+  const aliases = [
+    studentId,
+    getStudentIdentity(student),
+    getStudentFallbackId(student),
+    student?.id,
+    student?.studentId,
+    student?.studentKey,
+    student?.canonicalStudentId,
+    ...(Array.isArray(student?.linkedStudentIds) ? student.linkedStudentIds : []),
+  ].filter(Boolean).map(String);
+  const overrides = item.studentOverrides || item.overrides || {};
+  for (const alias of aliases) {
+    const override = overrides[alias];
+    if (override?.processKey) return String(override.processKey);
+  }
+  return String(item?.process?.processKey || item?.processKey || "");
 }
 
 function wireBitacoraModals(bitacoras = []) {
