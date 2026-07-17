@@ -30,6 +30,8 @@ import {
   startAfter,
   onSnapshot,
   serverTimestamp,
+  arrayUnion,
+  arrayRemove,
   documentId,
   setDoc,
   updateDoc,
@@ -735,15 +737,18 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
       const linkedIds = unique([
         ...safeArray(existing.studentIds),
         existing.studentId,
+        ...safeArray(existing.students),
       ].map((value) => safeText(value)));
 
       if (linkedIds.includes(id)) {
         return { email: normalizedEmail, status: "already-linked" };
       }
 
-      const error = new Error("EMAIL_LINKED_TO_ANOTHER_STUDENT");
-      error.code = "EMAIL_LINKED_TO_ANOTHER_STUDENT";
-      throw error;
+      await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
+        studentIds: arrayUnion(id),
+        updatedAt: serverTimestamp(),
+      });
+      return { email: normalizedEmail, status: "student-added" };
     }
 
     await setDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
@@ -763,11 +768,31 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
   }
 }
 
-export async function revokeManagedPortalAccess(email) {
+export async function revokeManagedPortalAccess(email, studentId) {
   const normalizedEmail = normalizeEmail(email);
+  const id = safeText(studentId);
   assertNonEmptyString(normalizedEmail, "email");
+  assertNonEmptyString(id, "studentId");
   try {
-    await deleteDoc(doc(db, COLLECTIONS.users, normalizedEmail));
+    const existing = await getAccessProfileByEmail(normalizedEmail);
+    if (!existing) return false;
+
+    const remaining = unique([
+      ...safeArray(existing.studentIds),
+      existing.studentId,
+      ...safeArray(existing.students),
+    ].map((value) => safeText(value))).filter((linkedId) => linkedId !== id);
+
+    const profileRef = doc(db, COLLECTIONS.users, normalizedEmail);
+    if (!remaining.length && existing.portalAccessManaged === true) {
+      await deleteDoc(profileRef);
+    } else {
+      await updateDoc(profileRef, {
+        studentIds: arrayRemove(id),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    return true;
   } catch (error) {
     throw withContextError(error, "revokeManagedPortalAccess");
   }

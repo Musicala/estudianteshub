@@ -934,7 +934,7 @@ async function openPortalAccessManager(deps) {
     ? `<div class="stack">${accesses.map((item) => `
         <div class="item-row">
           <div class="item-row__main"><strong>${escapeHtml(item.email)}</strong><span>${item.portalAccessManaged === true ? "Acceso de acudiente" : "Vinculado previamente"}</span></div>
-          ${item.portalAccessManaged === true ? `<button class="btn btn--ghost btn--sm" type="button" data-revoke-portal-access="${escapeAttr(item.email)}">Quitar</button>` : ""}
+          <button class="btn btn--ghost btn--sm" type="button" data-revoke-portal-access="${escapeAttr(item.email)}">Quitar de este estudiante</button>
         </div>`).join("")}</div>`
     : `<p class="note">Aún no hay correos adicionales vinculados desde este portal.</p>`;
 
@@ -964,6 +964,8 @@ async function openPortalAccessManager(deps) {
       deps.ui.toast(
         result?.status === "already-linked"
           ? "Ese correo ya estaba vinculado a este proceso."
+          : result?.status === "student-added"
+            ? "Correo vinculado a este estudiante. Conservará sus demás accesos."
           : "Correo vinculado. Ya puede entrar con Google.",
         "success"
       );
@@ -983,11 +985,11 @@ async function openPortalAccessManager(deps) {
   modalRoot?.querySelectorAll("[data-revoke-portal-access]").forEach((buttonEl) => {
     buttonEl.addEventListener("click", async () => {
       const email = buttonEl.getAttribute("data-revoke-portal-access") || "";
-      if (!email || !window.confirm(`¿Quitar el acceso de ${email}?`)) return;
+      if (!email || !window.confirm(`¿Quitar a ${email} solo de este estudiante? Si tiene otros hijos vinculados, conservará esos accesos.`)) return;
       buttonEl.disabled = true;
       try {
-        await api.revokeManagedPortalAccess(email);
-        deps.ui.toast("Acceso quitado.", "success");
+        await api.revokeManagedPortalAccess(email, studentId);
+        deps.ui.toast("Acceso quitado de este estudiante.", "success");
         openPortalAccessManager(deps);
       } catch (error) {
         console.error("[profile] No se pudo quitar correo", error);
