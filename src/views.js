@@ -933,8 +933,8 @@ async function openPortalAccessManager(deps) {
   const rows = accesses.length
     ? `<div class="stack">${accesses.map((item) => `
         <div class="item-row">
-          <div class="item-row__main"><strong>${escapeHtml(item.email)}</strong><span>Acceso de acudiente</span></div>
-          <button class="btn btn--ghost btn--sm" type="button" data-revoke-portal-access="${escapeAttr(item.email)}">Quitar</button>
+          <div class="item-row__main"><strong>${escapeHtml(item.email)}</strong><span>${item.portalAccessManaged === true ? "Acceso de acudiente" : "Vinculado previamente"}</span></div>
+          ${item.portalAccessManaged === true ? `<button class="btn btn--ghost btn--sm" type="button" data-revoke-portal-access="${escapeAttr(item.email)}">Quitar</button>` : ""}
         </div>`).join("")}</div>`
     : `<p class="note">Aún no hay correos adicionales vinculados desde este portal.</p>`;
 
@@ -960,12 +960,22 @@ async function openPortalAccessManager(deps) {
     const submit = form.querySelector("button[type='submit']");
     submit.disabled = true;
     try {
-      await api.linkPortalAccess({ email, studentId, linkedBy: ctx.user?.email || "" });
-      deps.ui.toast("Correo vinculado. Ya puede entrar con Google.", "success");
+      const result = await api.linkPortalAccess({ email, studentId, linkedBy: ctx.user?.email || "" });
+      deps.ui.toast(
+        result?.status === "already-linked"
+          ? "Ese correo ya estaba vinculado a este proceso."
+          : "Correo vinculado. Ya puede entrar con Google.",
+        "success"
+      );
       openPortalAccessManager(deps);
     } catch (error) {
       console.error("[profile] No se pudo vincular correo", error);
-      deps.ui.toast("No se pudo vincular el correo. Revisa que sea válido y vuelve a intentarlo.", "danger");
+      deps.ui.toast(
+        error?.code === "EMAIL_LINKED_TO_ANOTHER_STUDENT"
+          ? "Ese correo ya está vinculado a otro estudiante. Para proteger su acceso no lo cambiamos."
+          : "No se pudo vincular el correo. Revisa que sea válido y vuelve a intentarlo.",
+        "danger"
+      );
       submit.disabled = false;
     }
   });

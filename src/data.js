@@ -710,7 +710,12 @@ export async function listManagedPortalAccesses(studentId) {
     ));
     return snap.docs
       .map((item) => normalizeAccessProfile({ ...item.data(), id: item.id, email: item.id }))
-      .filter((profile) => profile.portalAccessManaged === true)
+      // Incluye los accesos administrados por esta versión y los que el HUB
+      // anterior ya había reparado/vinculado. Así no parecen "vacíos" ni
+      // se intenta crear de nuevo un correo que ya tiene acceso.
+      .filter((profile) =>
+        profile.portalAccessManaged === true || profile.linkedFromHub === true
+      )
       .sort((a, b) => a.email.localeCompare(b.email, "es"));
   } catch (error) {
     throw withContextError(error, "listManagedPortalAccesses");
@@ -725,6 +730,22 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
   assertNonEmptyString(id, "studentId");
   assertNonEmptyString(actor, "linkedBy");
   try {
+    const existing = await getAccessProfileByEmail(normalizedEmail);
+    if (existing) {
+      const linkedIds = unique([
+        ...safeArray(existing.studentIds),
+        existing.studentId,
+      ].map((value) => safeText(value)));
+
+      if (linkedIds.includes(id)) {
+        return { email: normalizedEmail, status: "already-linked" };
+      }
+
+      const error = new Error("EMAIL_LINKED_TO_ANOTHER_STUDENT");
+      error.code = "EMAIL_LINKED_TO_ANOTHER_STUDENT";
+      throw error;
+    }
+
     await setDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
       email: normalizedEmail,
       role: "acudiente",
@@ -736,7 +757,7 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
       linkedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
-    return normalizedEmail;
+    return { email: normalizedEmail, status: "linked" };
   } catch (error) {
     throw withContextError(error, "linkPortalAccess");
   }
