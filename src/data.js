@@ -336,10 +336,13 @@ export function normalizeAccessProfile(raw = null) {
     .toLowerCase();
   const canonicalStudentId = safeText(raw.studentId);
 
-  const studentIds = unique([
-    ...safeArray(raw.studentIds),
-    canonicalStudentId,
-  ].map((id) => safeText(id)));
+  // studentIds es el contrato actual y autoritativo para cuentas con varios
+  // estudiantes. Los campos singulares son legados; mezclarlos aquí revive
+  // accesos ya revocados cuando quedaron desactualizados.
+  const explicitStudentIds = safeArray(raw.studentIds).map((id) => safeText(id)).filter(Boolean);
+  const studentIds = explicitStudentIds.length
+    ? unique(explicitStudentIds)
+    : unique([canonicalStudentId, ...safeArray(raw.students)].map((id) => safeText(id)));
 
   return {
     ...raw,
