@@ -73,6 +73,31 @@ service cloud.firestore {
         linkedStudentIds().size() > 0;
     }
 
+    function isPortalAccessRole(role) {
+      return role in ["student", "estudiante", "acudiente", "guardian", "parent"];
+    }
+
+    // Un admin puede crear accesos de portal, nunca perfiles internos ni
+    // modificar campos de identidad publicados por los backends.
+    function validManagedPortalAccess(emailKey) {
+      return emailKey == request.resource.data.email &&
+        request.resource.data.email is string &&
+        request.resource.data.email.lower() == emailKey &&
+        isPortalAccessRole(request.resource.data.role) &&
+        request.resource.data.active == true &&
+        request.resource.data.portalAccessManaged == true &&
+        request.resource.data.studentId is string &&
+        request.resource.data.studentId != '' &&
+        request.resource.data.studentIds is list &&
+        request.resource.data.studentIds.size() == 1 &&
+        request.resource.data.studentIds[0] == request.resource.data.studentId &&
+        request.resource.data.linkedBy == authEmail() &&
+        request.resource.data.keys().hasOnly([
+          'email', 'role', 'active', 'studentId', 'studentIds',
+          'portalAccessManaged', 'linkedBy', 'linkedAt', 'updatedAt'
+        ]);
+    }
+
     /*
       Sin comprobaciones "is list"/"is string": si el campo no existe, la rama
       falla sola y el || la absorbe cuando la otra concede. Acceder al campo
@@ -109,8 +134,11 @@ service cloud.firestore {
 
     match /users/{emailKey} {
       allow read: if isAdmin() || (isSignedIn() && authEmail() == emailKey);
-      // Los perfiles de acceso e identidad se aprovisionan solo desde backend.
-      allow create, update, delete: if false;
+      allow create: if isAdmin() && validManagedPortalAccess(emailKey);
+      allow update: if isAdmin() &&
+        resource.data.portalAccessManaged == true &&
+        validManagedPortalAccess(emailKey);
+      allow delete: if isAdmin() && resource.data.portalAccessManaged == true;
     }
 
     match /app_config/{docId} {

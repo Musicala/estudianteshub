@@ -699,7 +699,58 @@ export async function getUserByEmail(email) {
   return getAccessProfileByEmail(email);
 }
 
-/* La identidad se prepara exclusivamente en backends autorizados. */
+// Accesos adicionales administrados por un admin desde el perfil del estudiante.
+export async function listManagedPortalAccesses(studentId) {
+  const id = safeText(studentId);
+  assertNonEmptyString(id, "studentId");
+  try {
+    const snap = await getDocs(query(
+      collection(db, COLLECTIONS.users),
+      where("studentIds", "array-contains", id)
+    ));
+    return snap.docs
+      .map((item) => normalizeAccessProfile({ ...item.data(), id: item.id, email: item.id }))
+      .filter((profile) => profile.portalAccessManaged === true)
+      .sort((a, b) => a.email.localeCompare(b.email, "es"));
+  } catch (error) {
+    throw withContextError(error, "listManagedPortalAccesses");
+  }
+}
+
+export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {}) {
+  const normalizedEmail = normalizeEmail(email);
+  const id = safeText(studentId);
+  const actor = normalizeEmail(linkedBy);
+  assertNonEmptyString(normalizedEmail, "email");
+  assertNonEmptyString(id, "studentId");
+  assertNonEmptyString(actor, "linkedBy");
+  try {
+    await setDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
+      email: normalizedEmail,
+      role: "acudiente",
+      active: true,
+      studentId: id,
+      studentIds: [id],
+      portalAccessManaged: true,
+      linkedBy: actor,
+      linkedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    return normalizedEmail;
+  } catch (error) {
+    throw withContextError(error, "linkPortalAccess");
+  }
+}
+
+export async function revokeManagedPortalAccess(email) {
+  const normalizedEmail = normalizeEmail(email);
+  assertNonEmptyString(normalizedEmail, "email");
+  try {
+    await deleteDoc(doc(db, COLLECTIONS.users, normalizedEmail));
+  } catch (error) {
+    throw withContextError(error, "revokeManagedPortalAccess");
+  }
+}
 /* =============================================================================
   STUDENTS
 ============================================================================= */

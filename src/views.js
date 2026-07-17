@@ -839,6 +839,7 @@ async function renderHome(deps) {
 async function renderProfile(deps) {
   const ctx = getCtx(deps);
   const student = getStudent(ctx);
+  const canManageAccess = Boolean(ctx.isAdmin && ctx.studentId);
 
   const rows = getStudentProfileRows(student);
 
@@ -881,6 +882,19 @@ async function renderProfile(deps) {
         `,
       })}
 
+      ${canManageAccess ? card({
+        title: "Correos con acceso",
+        subtitle: "Vincula un correo de acudiente, familiar o prueba a este proceso.",
+        bodyHTML: `
+          <p class="note">Cada correo entra con Google y solo podrá ver el proceso de ${escapeHtml(getStudentDisplayName(student) || "este estudiante")}.</p>
+          <div class="cluster">
+            <button class="btn btn--primary" type="button" data-action="manage-portal-access">
+              <span aria-hidden="true">+</span><span>Vincular correo</span>
+            </button>
+          </div>
+        `,
+      }) : ""}
+
       ${card({
         title: "Nota",
         subtitle: "Si algún dato no coincide, se ajusta desde el sistema interno de Musicala.",
@@ -894,7 +908,84 @@ async function renderProfile(deps) {
     `)}
   `;
 
-  return html;
+  return {
+    html,
+    afterRender: () => {
+      const manageButton = viewRoot()?.querySelector("[data-action='manage-portal-access']");
+      if (manageButton) manageButton.addEventListener("click", () => openPortalAccessManager(deps));
+    },
+  };
+}
+
+async function openPortalAccessManager(deps) {
+  const ctx = getCtx(deps);
+  const api = getApi(deps);
+  const studentId = getStudentId(ctx);
+  if (!ctx.isAdmin || !studentId) return;
+
+  let accesses = [];
+  try {
+    accesses = await api.listManagedPortalAccesses(studentId);
+  } catch (error) {
+    console.error("[profile] No se pudieron cargar accesos vinculados", error);
+  }
+
+  const rows = accesses.length
+    ? `<div class="stack">${accesses.map((item) => `
+        <div class="item-row">
+          <div class="item-row__main"><strong>${escapeHtml(item.email)}</strong><span>Acceso de acudiente</span></div>
+          <button class="btn btn--ghost btn--sm" type="button" data-revoke-portal-access="${escapeAttr(item.email)}">Quitar</button>
+        </div>`).join("")}</div>`
+    : `<p class="note">Aún no hay correos adicionales vinculados desde este portal.</p>`;
+
+  openModal({
+    title: "Vincular correo",
+    subtitle: "El correo podrá entrar con Google y ver solo este proceso.",
+    bodyHTML: `
+      <form id="portalAccessForm" class="stack">
+        <label class="field"><span>Correo de Google</span><input class="input" name="email" type="email" autocomplete="email" required placeholder="familia@correo.com" /></label>
+        <button class="btn btn--primary" type="submit">Vincular acceso</button>
+      </form>
+      <div class="stack" style="margin-top:1rem"><strong>Correos vinculados</strong>${rows}</div>`,
+    focusSelector: "input[name='email']",
+  });
+
+  const modalRoot = document.querySelector("#modalRoot");
+  const form = modalRoot?.querySelector("#portalAccessForm");
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = form.elements.email;
+    const email = String(input?.value || "").trim().toLowerCase();
+    if (!email) return;
+    const submit = form.querySelector("button[type='submit']");
+    submit.disabled = true;
+    try {
+      await api.linkPortalAccess({ email, studentId, linkedBy: ctx.user?.email || "" });
+      deps.ui.toast("Correo vinculado. Ya puede entrar con Google.", "success");
+      openPortalAccessManager(deps);
+    } catch (error) {
+      console.error("[profile] No se pudo vincular correo", error);
+      deps.ui.toast("No se pudo vincular el correo. Revisa que sea válido y vuelve a intentarlo.", "danger");
+      submit.disabled = false;
+    }
+  });
+
+  modalRoot?.querySelectorAll("[data-revoke-portal-access]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", async () => {
+      const email = buttonEl.getAttribute("data-revoke-portal-access") || "";
+      if (!email || !window.confirm(`¿Quitar el acceso de ${email}?`)) return;
+      buttonEl.disabled = true;
+      try {
+        await api.revokeManagedPortalAccess(email);
+        deps.ui.toast("Acceso quitado.", "success");
+        openPortalAccessManager(deps);
+      } catch (error) {
+        console.error("[profile] No se pudo quitar correo", error);
+        deps.ui.toast("No se pudo quitar ese acceso.", "danger");
+        buttonEl.disabled = false;
+      }
+    });
+  });
 }
 
 /* =============================================================================
