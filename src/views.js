@@ -1486,10 +1486,6 @@ async function renderJournal(deps) {
   const api = getApi(deps);
   const studentId = getStudentId(ctx);
   const student = getStudent(ctx);
-  const authorizedAliasIds = [
-    ...safeArray(ctx.studentIds),
-    ...safeArray(student?.linkedStudentIds),
-  ];
 
   let rows = [];
   let journalError = null;
@@ -1504,7 +1500,6 @@ async function renderJournal(deps) {
     rows = await api.listBitacorasByStudent(studentId, {
       max: 80,
       student,
-      aliasIds: authorizedAliasIds,
     }).catch(logJournalError);
 
     const fallbackId = getStudentFallbackQueryId(ctx);
@@ -1512,7 +1507,6 @@ async function renderJournal(deps) {
       rows = await api.listBitacorasByStudent(fallbackId, {
         max: 80,
         student,
-        aliasIds: authorizedAliasIds,
       }).catch(logJournalError);
     }
   } else if (typeof api.listJournal === "function") {
@@ -3504,7 +3498,6 @@ async function renderTimeline(deps) {
         bitacoras = await api.listBitacorasByStudent(studentId, {
           max: 60,
           student: getStudent(ctx),
-          aliasIds: safeArray(ctx.studentIds),
         }).catch(() => []);
       }
     })(),
