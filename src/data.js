@@ -30,7 +30,6 @@ import {
   startAfter,
   onSnapshot,
   serverTimestamp,
-  arrayUnion,
   arrayRemove,
   documentId,
   setDoc,
@@ -741,14 +740,28 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
       ].map((value) => safeText(value)));
 
       if (linkedIds.includes(id)) {
-        return { email: normalizedEmail, status: "already-linked" };
+        // Repara perfiles de acceso heredados: al confirmar el mismo vínculo,
+        // el identificador vigente debe ser el único que consume el HUB.
+        // Así un `studentId` antiguo no puede volver a seleccionarse desde
+        // localStorage ni mostrar el repertorio de otra persona.
+        await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
+          studentId: id,
+          studentKey: id,
+          studentIds: [id],
+          portalAccessManaged: true,
+          updatedAt: serverTimestamp(),
+        });
+        return { email: normalizedEmail, status: "student-canonicalized" };
       }
 
       await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
-        studentIds: arrayUnion(id),
+        studentId: id,
+        studentKey: id,
+        studentIds: [id],
+        portalAccessManaged: true,
         updatedAt: serverTimestamp(),
       });
-      return { email: normalizedEmail, status: "student-added" };
+      return { email: normalizedEmail, status: "student-canonicalized" };
     }
 
     await setDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
@@ -859,6 +872,20 @@ export async function createStudentWorkSuggestion(studentId, student, payload = 
   return { id: ref.id, studentId: id, nombre, estado: "pendiente" };
 }
 
+function getStudentIdentityCandidates(student = {}) {
+  return unique([
+    student.id,
+    student.studentId,
+    student.studentKey,
+    student.estudianteId,
+    student.canonicalStudentId,
+    student.legacyAliasOf,
+    ...(safeArray(student.studentIds)),
+    ...(safeArray(student.aliases)),
+    ...(safeArray(student.linkedStudentIds)),
+  ].map((value) => safeText(value)));
+}
+
 export async function getStudentsByIds(studentIds = []) {
   try {
     const ids = unique(safeArray(studentIds).map((id) => safeText(id)));
@@ -900,6 +927,69 @@ export async function getStudentsByIds(studentIds = []) {
 
       out.push(
         ...settled
+          .filter((item) => item.status === "fulfilled" && item.value)
+          .map((item) => item.value)
+      );
+    }
+
+    /*
+      Descubrimiento inverso de identidad. El documento canónico puede no
+      contener todavía linkedStudentIds aunque los documentos académicos sí
+      tengan canonicalStudentId confirmado. El panel admin los encontraba al
+      listar toda la colección; estudiantes/acudientes no, y renderWorks recibía
+      solamente el registro canónico sin repertorio.
+
+      La consulta está acotada a los IDs autorizados del perfil. Las reglas
+      canónicas de Bitácoras validan el mismo canonicalStudentId antes de
+      devolver cada documento.
+    */
+    try {
+      for (const part of parts) {
+        const aliasesQuery = query(
+          studentsRef,
+          where("canonicalStudentId", "in", part)
+        );
+        const aliasesSnap = await getDocs(aliasesQuery);
+
+        out.push(
+          ...docsToObjects(aliasesSnap).map((item) => normalizeStudent(item))
+        );
+      }
+    } catch (error) {
+      if (!isPermissionError(error)) throw error;
+
+      console.warn(
+        "[data] No se pudo descubrir aliases por canonicalStudentId. Se conservarán los enlaces explícitos.",
+        error
+      );
+    }
+
+    /*
+      Un vínculo de acudiente puede llegar al registro administrativo o al
+      canónico. Las obras pedagógicas, en cambio, pueden estar en el otro
+      documento de la misma identidad. Cargamos los aliases declarados por el
+      propio registro y después los resolvemos juntos; nunca se adivinan por
+      nombre ni se mezclan estudiantes distintos.
+    */
+    const loadedIds = new Set(out.map((student) => safeText(student?.id)).filter(Boolean));
+    const linkedIds = unique(
+      out.flatMap((student) => getStudentIdentityCandidates(student))
+    )
+      .filter((id) => !loadedIds.has(id))
+      .slice(0, 40);
+
+    if (linkedIds.length) {
+      const settledAliases = await Promise.allSettled(
+        linkedIds.map(async (id) => {
+          const snap = await getDoc(doc(db, COLLECTIONS.students, id));
+          return snap.exists()
+            ? normalizeStudent({ id: snap.id, ...snap.data() })
+            : null;
+        })
+      );
+
+      out.push(
+        ...settledAliases
           .filter((item) => item.status === "fulfilled" && item.value)
           .map((item) => item.value)
       );

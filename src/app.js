@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-17.3-bitacoras-por-estudiante",
+  build: "2026-07-18.4-repertorio-alias-query",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -498,6 +498,11 @@ function consolidateStudentIdsFromCache(ids = []) {
 
   for (const id of originalIds) {
     const student = state.studentsById.get(id);
+    // Los perfiles antiguos pueden conservar aliases técnicos (por ejemplo
+    // `stu_...` o el número de fila) en studentIds. Si ese alias no resuelve
+    // a un estudiante real, no es un proceso seleccionable y no debe aparecer
+    // como un segundo estudiante en el portal.
+    if (!student) continue;
     const key = student ? getCanonicalStudentKey(student) || id : id;
 
     if (seen.has(key)) continue;

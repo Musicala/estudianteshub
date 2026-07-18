@@ -224,18 +224,32 @@ export function resolveLogicalStudentRecords(records = []) {
     }
   });
 
+  /*
+    Un registro con vínculo administrativo confirmado (identityLinkStatus
+    "confirmed" + canonicalStudentId escrito en el doc) ya fue resuelto por un
+    admin: se excluye de la detección de pendientes para que la unión explícita
+    (vía canonicalStudentId) prevalezca y el estudiante no aparezca duplicado
+    ni "sin perfil".
+  */
+  const isConfirmedLinked = (record) =>
+    safeText(record?.identityLinkStatus) === "confirmed" &&
+    Boolean(safeText(record?.canonicalStudentId));
+
   const pendingGroups = [];
   groupBy(items, emailKey).forEach((emailGroup) => {
     groupBy(emailGroup, nameKey).forEach((sameIdentityGroup) => {
-      const stu = sameIdentityGroup.filter((record) =>
+      const automaticGroup = sameIdentityGroup.filter(
+        (record) => !isConfirmedLinked(record)
+      );
+      const stu = automaticGroup.filter((record) =>
         isStuId(documentId(record))
       );
-      const canonical = sameIdentityGroup.filter(
+      const canonical = automaticGroup.filter(
         (record) => !isStuId(documentId(record))
       );
       if (!stu.length || !canonical.length) return;
       if (canonical.length === 1) {
-        sameIdentityGroup.forEach((record) => {
+        automaticGroup.forEach((record) => {
           link(
             documentId(canonical[0]),
             documentId(record),
@@ -243,7 +257,7 @@ export function resolveLogicalStudentRecords(records = []) {
           );
         });
       } else {
-        pendingGroups.push(sameIdentityGroup);
+        pendingGroups.push(automaticGroup);
       }
     });
   });
