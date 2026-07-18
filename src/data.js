@@ -30,6 +30,7 @@ import {
   startAfter,
   onSnapshot,
   serverTimestamp,
+  arrayRemove,
   documentId,
   setDoc,
   updateDoc,
@@ -334,10 +335,13 @@ export function normalizeAccessProfile(raw = null) {
     .toLowerCase();
   const canonicalStudentId = safeText(raw.studentId);
 
-  const studentIds = unique([
-    ...safeArray(raw.studentIds),
-    canonicalStudentId,
-  ].map((id) => safeText(id)));
+  // studentIds es el contrato actual y autoritativo para cuentas con varios
+  // estudiantes. Los campos singulares son legados; mezclarlos aquí revive
+  // accesos ya revocados cuando quedaron desactualizados.
+  const explicitStudentIds = safeArray(raw.studentIds).map((id) => safeText(id)).filter(Boolean);
+  const studentIds = explicitStudentIds.length
+    ? unique(explicitStudentIds)
+    : unique([canonicalStudentId, ...safeArray(raw.students)].map((id) => safeText(id)));
 
   return {
     ...raw,
@@ -699,7 +703,119 @@ export async function getUserByEmail(email) {
   return getAccessProfileByEmail(email);
 }
 
-/* La identidad se prepara exclusivamente en backends autorizados. */
+// Accesos adicionales administrados por un admin desde el perfil del estudiante.
+export async function listManagedPortalAccesses(studentId) {
+  const id = safeText(studentId);
+  assertNonEmptyString(id, "studentId");
+  try {
+    const snap = await getDocs(query(
+      collection(db, COLLECTIONS.users),
+      where("studentIds", "array-contains", id)
+    ));
+    return snap.docs
+      .map((item) => normalizeAccessProfile({ ...item.data(), id: item.id, email: item.id }))
+      // Incluye los accesos administrados por esta versión y los que el HUB
+      // anterior ya había reparado/vinculado. Así no parecen "vacíos" ni
+      // se intenta crear de nuevo un correo que ya tiene acceso.
+      .sort((a, b) => a.email.localeCompare(b.email, "es"));
+  } catch (error) {
+    throw withContextError(error, "listManagedPortalAccesses");
+  }
+}
+
+export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {}) {
+  const normalizedEmail = normalizeEmail(email);
+  const id = safeText(studentId);
+  const actor = normalizeEmail(linkedBy);
+  assertNonEmptyString(normalizedEmail, "email");
+  assertNonEmptyString(id, "studentId");
+  assertNonEmptyString(actor, "linkedBy");
+  try {
+    const existing = await getAccessProfileByEmail(normalizedEmail);
+    if (existing) {
+      const linkedIds = unique([
+        ...safeArray(existing.studentIds),
+        existing.studentId,
+        ...safeArray(existing.students),
+      ].map((value) => safeText(value)));
+
+      if (linkedIds.includes(id)) {
+        // Repara perfiles de acceso heredados: al confirmar el mismo vínculo,
+        // el identificador vigente debe ser el único que consume el HUB.
+        // Así un `studentId` antiguo no puede volver a seleccionarse desde
+        // localStorage ni mostrar el repertorio de otra persona.
+        await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
+          studentId: id,
+          studentKey: id,
+          studentIds: [id],
+          portalAccessManaged: true,
+          updatedAt: serverTimestamp(),
+        });
+        return { email: normalizedEmail, status: "student-canonicalized" };
+      }
+
+      await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
+        studentId: id,
+        studentKey: id,
+        studentIds: [id],
+        portalAccessManaged: true,
+        updatedAt: serverTimestamp(),
+      });
+      return { email: normalizedEmail, status: "student-canonicalized" };
+    }
+
+    await setDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
+      email: normalizedEmail,
+      role: "acudiente",
+      active: true,
+      studentId: id,
+      studentIds: [id],
+      portalAccessManaged: true,
+      linkedBy: actor,
+      linkedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    return { email: normalizedEmail, status: "linked" };
+  } catch (error) {
+    throw withContextError(error, "linkPortalAccess");
+  }
+}
+
+export async function revokeManagedPortalAccess(email, studentId) {
+  const normalizedEmail = normalizeEmail(email);
+  const id = safeText(studentId);
+  assertNonEmptyString(normalizedEmail, "email");
+  assertNonEmptyString(id, "studentId");
+  try {
+    const existing = await getAccessProfileByEmail(normalizedEmail);
+    if (!existing) return false;
+
+    // Un estudiante puede estar representado por correo, id histórico y
+    // studentKey. Revocar sólo el id visible dejaba un alias autorizado y el
+    // estudiante seguía apareciendo en el selector.
+    const student = await getStudent(id).catch(() => null);
+    const accessAliases = buildStudentAliasIds(student, id);
+
+    const remaining = unique([
+      ...safeArray(existing.studentIds),
+      existing.studentId,
+      ...safeArray(existing.students),
+    ].map((value) => safeText(value))).filter((linkedId) => !accessAliases.includes(linkedId));
+
+    const profileRef = doc(db, COLLECTIONS.users, normalizedEmail);
+    if (!remaining.length && existing.portalAccessManaged === true) {
+      await deleteDoc(profileRef);
+    } else {
+      await updateDoc(profileRef, {
+        studentIds: arrayRemove(...accessAliases),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    return true;
+  } catch (error) {
+    throw withContextError(error, "revokeManagedPortalAccess");
+  }
+}
 /* =============================================================================
   STUDENTS
 ============================================================================= */
@@ -756,6 +872,20 @@ export async function createStudentWorkSuggestion(studentId, student, payload = 
   return { id: ref.id, studentId: id, nombre, estado: "pendiente" };
 }
 
+function getStudentIdentityCandidates(student = {}) {
+  return unique([
+    student.id,
+    student.studentId,
+    student.studentKey,
+    student.estudianteId,
+    student.canonicalStudentId,
+    student.legacyAliasOf,
+    ...(safeArray(student.studentIds)),
+    ...(safeArray(student.aliases)),
+    ...(safeArray(student.linkedStudentIds)),
+  ].map((value) => safeText(value)));
+}
+
 export async function getStudentsByIds(studentIds = []) {
   try {
     const ids = unique(safeArray(studentIds).map((id) => safeText(id)));
@@ -797,6 +927,69 @@ export async function getStudentsByIds(studentIds = []) {
 
       out.push(
         ...settled
+          .filter((item) => item.status === "fulfilled" && item.value)
+          .map((item) => item.value)
+      );
+    }
+
+    /*
+      Descubrimiento inverso de identidad. El documento canónico puede no
+      contener todavía linkedStudentIds aunque los documentos académicos sí
+      tengan canonicalStudentId confirmado. El panel admin los encontraba al
+      listar toda la colección; estudiantes/acudientes no, y renderWorks recibía
+      solamente el registro canónico sin repertorio.
+
+      La consulta está acotada a los IDs autorizados del perfil. Las reglas
+      canónicas de Bitácoras validan el mismo canonicalStudentId antes de
+      devolver cada documento.
+    */
+    try {
+      for (const part of parts) {
+        const aliasesQuery = query(
+          studentsRef,
+          where("canonicalStudentId", "in", part)
+        );
+        const aliasesSnap = await getDocs(aliasesQuery);
+
+        out.push(
+          ...docsToObjects(aliasesSnap).map((item) => normalizeStudent(item))
+        );
+      }
+    } catch (error) {
+      if (!isPermissionError(error)) throw error;
+
+      console.warn(
+        "[data] No se pudo descubrir aliases por canonicalStudentId. Se conservarán los enlaces explícitos.",
+        error
+      );
+    }
+
+    /*
+      Un vínculo de acudiente puede llegar al registro administrativo o al
+      canónico. Las obras pedagógicas, en cambio, pueden estar en el otro
+      documento de la misma identidad. Cargamos los aliases declarados por el
+      propio registro y después los resolvemos juntos; nunca se adivinan por
+      nombre ni se mezclan estudiantes distintos.
+    */
+    const loadedIds = new Set(out.map((student) => safeText(student?.id)).filter(Boolean));
+    const linkedIds = unique(
+      out.flatMap((student) => getStudentIdentityCandidates(student))
+    )
+      .filter((id) => !loadedIds.has(id))
+      .slice(0, 40);
+
+    if (linkedIds.length) {
+      const settledAliases = await Promise.allSettled(
+        linkedIds.map(async (id) => {
+          const snap = await getDoc(doc(db, COLLECTIONS.students, id));
+          return snap.exists()
+            ? normalizeStudent({ id: snap.id, ...snap.data() })
+            : null;
+        })
+      );
+
+      out.push(
+        ...settledAliases
           .filter((item) => item.status === "fulfilled" && item.value)
           .map((item) => item.value)
       );
@@ -2083,6 +2276,19 @@ function getStudentAreas(student) {
   return unique(collectStudentResourceTerms(student));
 }
 
+function getStudentResourceArts(student = null) {
+  const arts = detectArts(getStudentAreas(student));
+  // Los campos principales (area/programa) suelen conservar el primer proceso.
+  // Para estudiantes multiárea, la declaración directa de cada proceso manda.
+  for (const process of Array.isArray(student?.processes) ? student.processes : []) {
+    [process?.arte, process?.area, process?.label, process?.detalle]
+      .map(detectArtFromTerm)
+      .filter(Boolean)
+      .forEach((art) => arts.add(art));
+  }
+  return arts;
+}
+
 /*
   Especialidades "comunes" a toda una disciplina: un estudiante las ve aunque su
   instrumento no coincida (teoría/lenguaje musical, lectura, ritmo, material
@@ -2117,7 +2323,7 @@ function cleanResourceMatch(resource, student) {
   const studentAreas = getStudentAreas(student);
   if (!studentAreas.length) return true; // sin datos del estudiante -> mostrar
 
-  const studentArts = detectArts(studentAreas);
+  const studentArts = getStudentResourceArts(student);
   const resourceArt = detectArtFromTerm(disciplina) || disciplina;
   if (studentArts.size && !studentArts.has(resourceArt)) return false;
 

@@ -2134,6 +2134,153 @@ textarea.input {
   line-height: 1.55;
 }
 
+/* --------------------------------------------------------------------------
+  Obras: sugerencias del estudiante
+-------------------------------------------------------------------------- */
+
+.work-suggestion__empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px dashed rgba(12, 65, 196, 0.2);
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, rgba(12, 65, 196, 0.045), rgba(206, 0, 113, 0.035));
+}
+
+.work-suggestion__empty-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--mozart);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--shadow-xs);
+  font-size: 1.1rem;
+}
+
+.work-suggestion__empty strong,
+.work-suggestion__field > span {
+  color: var(--ink);
+  font-size: var(--fs-13);
+  font-weight: 800;
+}
+
+.work-suggestion__empty p,
+.work-suggestion__intro p,
+.work-suggestion__actions p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.work-suggestion {
+  width: 100%;
+}
+
+.work-suggestion__intro {
+  margin-bottom: 14px;
+}
+
+.work-suggestion__eyebrow {
+  color: var(--fuchsia);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.work-suggestion__fields {
+  display: grid;
+  gap: 11px;
+}
+
+.work-suggestion__field {
+  display: grid;
+  gap: 6px;
+}
+
+.work-suggestion__field em {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.work-suggestion__field input,
+.work-suggestion__field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(20, 32, 60, 0.14);
+  border-radius: 12px;
+  outline: none;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: 500;
+  line-height: 1.45;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.work-suggestion__field input {
+  min-height: 46px;
+  padding: 0 13px;
+}
+
+.work-suggestion__field textarea {
+  min-height: 86px;
+  padding: 11px 13px;
+  resize: vertical;
+}
+
+.work-suggestion__field input::placeholder,
+.work-suggestion__field textarea::placeholder {
+  color: #98a1b7;
+}
+
+.work-suggestion__field input:focus,
+.work-suggestion__field textarea:focus {
+  border-color: rgba(12, 65, 196, 0.58);
+  box-shadow: 0 0 0 4px rgba(12, 65, 196, 0.1);
+}
+
+.work-suggestion__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.work-suggestion__actions p {
+  max-width: 250px;
+  margin-top: 0;
+}
+
+.work-suggestion__actions .btn {
+  min-width: 154px;
+}
+
+@media (max-width: 520px) {
+  .work-suggestion__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .work-suggestion__actions p {
+    max-width: none;
+  }
+
+  .work-suggestion__actions .btn {
+    width: 100%;
+  }
+}
+
 .read {
   color: var(--ink-2);
   font-size: var(--fs-14);

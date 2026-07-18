@@ -184,10 +184,20 @@ export function canStudentAccessHub(student = null) {
 export function getLinkedStudentIds(profile = null) {
   if (!profile) return [];
 
-  return uniqueArray([
-    ...safeArray(profile.studentIds),
-    profile.studentId,
-  ].map((item) => safeText(item)));
+  const managedIds = uniqueArray(
+    safeArray(profile.studentIds).map((item) => safeText(item))
+  );
+
+  /*
+    `studentIds` es la fuente actual de los vínculos administrados. Algunos
+    perfiles antiguos conservan un `studentId` anterior después de que un
+    administrador vincula otra persona; mezclar ambos hace que el portal
+    reactive el estudiante viejo desde localStorage. Sólo usamos el campo
+    legado cuando todavía no existe una lista administrada.
+  */
+  return managedIds.length
+    ? managedIds
+    : uniqueArray([safeText(profile.studentId)]);
 }
 
 export function hasRole(profile = null, roles = []) {

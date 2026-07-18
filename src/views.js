@@ -67,6 +67,7 @@ import {
   getStudentDisplayName,
   getStudentSubtitle,
   getStudentProfileRows,
+  normalizeStudentProcesses,
   safeArray,
   toDateMaybe,
 } from "./normalizers.js";
@@ -839,6 +840,7 @@ async function renderHome(deps) {
 async function renderProfile(deps) {
   const ctx = getCtx(deps);
   const student = getStudent(ctx);
+  const canManageAccess = Boolean(ctx.isAdmin && ctx.studentId);
 
   const rows = getStudentProfileRows(student);
 
@@ -881,6 +883,19 @@ async function renderProfile(deps) {
         `,
       })}
 
+      ${canManageAccess ? card({
+        title: "Correos con acceso",
+        subtitle: "Vincula un correo de acudiente, familiar o prueba a este proceso.",
+        bodyHTML: `
+          <p class="note">Cada correo entra con Google y solo podrá ver el proceso de ${escapeHtml(getStudentDisplayName(student) || "este estudiante")}.</p>
+          <div class="cluster">
+            <button class="btn btn--primary" type="button" data-action="manage-portal-access">
+              <span aria-hidden="true">+</span><span>Vincular correo</span>
+            </button>
+          </div>
+        `,
+      }) : ""}
+
       ${card({
         title: "Nota",
         subtitle: "Si algún dato no coincide, se ajusta desde el sistema interno de Musicala.",
@@ -894,7 +909,96 @@ async function renderProfile(deps) {
     `)}
   `;
 
-  return html;
+  return {
+    html,
+    afterRender: () => {
+      const manageButton = viewRoot()?.querySelector("[data-action='manage-portal-access']");
+      if (manageButton) manageButton.addEventListener("click", () => openPortalAccessManager(deps));
+    },
+  };
+}
+
+async function openPortalAccessManager(deps) {
+  const ctx = getCtx(deps);
+  const api = getApi(deps);
+  const studentId = getStudentId(ctx);
+  if (!ctx.isAdmin || !studentId) return;
+
+  let accesses = [];
+  try {
+    accesses = await api.listManagedPortalAccesses(studentId);
+  } catch (error) {
+    console.error("[profile] No se pudieron cargar accesos vinculados", error);
+  }
+
+  const rows = accesses.length
+    ? `<div class="stack">${accesses.map((item) => `
+        <div class="item-row">
+          <div class="item-row__main"><strong>${escapeHtml(item.email)}</strong><span>${item.portalAccessManaged === true ? "Acceso de acudiente" : "Vinculado previamente"}</span></div>
+          <button class="btn btn--ghost btn--sm" type="button" data-revoke-portal-access="${escapeAttr(item.email)}">Quitar de este estudiante</button>
+        </div>`).join("")}</div>`
+    : `<p class="note">Aún no hay correos adicionales vinculados desde este portal.</p>`;
+
+  openModal({
+    title: "Vincular correo",
+    subtitle: "El correo podrá entrar con Google y ver solo este proceso.",
+    bodyHTML: `
+      <form id="portalAccessForm" class="stack">
+        <label class="field"><span>Correo de Google</span><input class="input" name="email" type="email" autocomplete="email" required placeholder="familia@correo.com" /></label>
+        <button class="btn btn--primary" type="submit">Vincular acceso</button>
+      </form>
+      <div class="stack" style="margin-top:1rem"><strong>Correos vinculados</strong>${rows}</div>`,
+    focusSelector: "input[name='email']",
+  });
+
+  const modalRoot = document.querySelector("#modalRoot");
+  const form = modalRoot?.querySelector("#portalAccessForm");
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = form.elements.email;
+    const email = String(input?.value || "").trim().toLowerCase();
+    if (!email) return;
+    const submit = form.querySelector("button[type='submit']");
+    submit.disabled = true;
+    try {
+      const result = await api.linkPortalAccess({ email, studentId, linkedBy: ctx.user?.email || "" });
+      deps.ui.toast(
+        result?.status === "already-linked"
+          ? "Ese correo ya estaba vinculado a este proceso."
+          : result?.status === "student-added"
+            ? "Correo vinculado a este estudiante. Conservará sus demás accesos."
+          : "Correo vinculado. Ya puede entrar con Google.",
+        "success"
+      );
+      openPortalAccessManager(deps);
+    } catch (error) {
+      console.error("[profile] No se pudo vincular correo", error);
+      deps.ui.toast(
+        error?.code === "EMAIL_LINKED_TO_ANOTHER_STUDENT"
+          ? "Ese correo ya está vinculado a otro estudiante. Para proteger su acceso no lo cambiamos."
+          : "No se pudo vincular el correo. Revisa que sea válido y vuelve a intentarlo.",
+        "danger"
+      );
+      submit.disabled = false;
+    }
+  });
+
+  modalRoot?.querySelectorAll("[data-revoke-portal-access]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", async () => {
+      const email = buttonEl.getAttribute("data-revoke-portal-access") || "";
+      if (!email || !window.confirm(`¿Quitar a ${email} solo de este estudiante? Si tiene otros hijos vinculados, conservará esos accesos.`)) return;
+      buttonEl.disabled = true;
+      try {
+        await api.revokeManagedPortalAccess(email, studentId);
+        deps.ui.toast("Acceso quitado de este estudiante.", "success");
+        openPortalAccessManager(deps);
+      } catch (error) {
+        console.error("[profile] No se pudo quitar correo", error);
+        deps.ui.toast("No se pudo quitar ese acceso.", "danger");
+        buttonEl.disabled = false;
+      }
+    });
+  });
 }
 
 /* =============================================================================
@@ -1383,10 +1487,6 @@ async function renderJournal(deps) {
   const api = getApi(deps);
   const studentId = getStudentId(ctx);
   const student = getStudent(ctx);
-  const authorizedAliasIds = [
-    ...safeArray(ctx.studentIds),
-    ...safeArray(student?.linkedStudentIds),
-  ];
 
   let rows = [];
   let journalError = null;
@@ -1401,7 +1501,6 @@ async function renderJournal(deps) {
     rows = await api.listBitacorasByStudent(studentId, {
       max: 80,
       student,
-      aliasIds: authorizedAliasIds,
     }).catch(logJournalError);
 
     const fallbackId = getStudentFallbackQueryId(ctx);
@@ -1409,7 +1508,6 @@ async function renderJournal(deps) {
       rows = await api.listBitacorasByStudent(fallbackId, {
         max: 80,
         student,
-        aliasIds: authorizedAliasIds,
       }).catch(logJournalError);
     }
   } else if (typeof api.listJournal === "function") {
@@ -1417,6 +1515,7 @@ async function renderJournal(deps) {
   }
 
   const bitacoras = normalizeBitacoras(rows);
+  const processes = normalizeStudentProcesses(student);
 
   if (!bitacoras.length) {
     const emptyMessage = journalError
@@ -1478,6 +1577,14 @@ async function renderJournal(deps) {
         />
       </label>
 
+      ${processes.length > 1 ? `<label class="journal-search__select-wrap" for="journalProcessFilter">
+        <span class="sr-only">Proceso</span>
+        <select id="journalProcessFilter" class="journal-search__select" data-journal-process>
+          <option value="">Todos los procesos</option>
+          ${processes.map((process) => `<option value="${escapeAttr(process.processKey)}">${escapeHtml(process.label || process.detalle || process.arte || "Proceso")}</option>`).join("")}
+        </select>
+      </label>` : ""}
+
       <label class="journal-search__select-wrap" for="journalCategoryFilter">
         <span class="sr-only">Categoría</span>
         <select id="journalCategoryFilter" class="journal-search__select" data-journal-category>
@@ -1509,6 +1616,7 @@ async function renderJournal(deps) {
     const searchText = getBitacoraSearchText(item);
     const sectionFilters = getBitacoraSectionLabels(content).map(normalizeSearchText).join(" ");
     const monthKey = getBitacoraMonthKey(date);
+    const processKey = getBitacoraProcessKeyForStudent(item, student, studentId);
 
     return `
       <article
@@ -1517,6 +1625,7 @@ async function renderJournal(deps) {
         data-journal-search-text="${escapeAttr(searchText)}"
         data-journal-categories="${escapeAttr(sectionFilters)}"
         data-journal-month="${escapeAttr(monthKey)}"
+        data-journal-process="${escapeAttr(processKey)}"
       >
         <div class="journal-card__top">
           <div>
@@ -1589,26 +1698,30 @@ function wireJournalSearch() {
   const input = root.querySelector("[data-journal-search]");
   const category = root.querySelector("[data-journal-category]");
   const month = root.querySelector("[data-journal-month]");
+  const process = root.querySelector("[data-journal-process]");
   const entries = Array.from(root.querySelectorAll("[data-journal-entry]"));
   const status = root.querySelector("[data-journal-status]");
   const empty = root.querySelector("[data-journal-empty]");
 
-  if (!entries.length || (!input && !category && !month)) return;
+  if (!entries.length || (!input && !category && !month && !process)) return;
 
   const applyFilters = () => {
     const query = normalizeSearchText(input?.value || "");
     const categoryValue = category?.value || "";
     const monthValue = month?.value || "";
+    const processValue = process?.value || "";
     let visible = 0;
 
     entries.forEach((entry) => {
       const text = entry.getAttribute("data-journal-search-text") || "";
       const categories = entry.getAttribute("data-journal-categories") || "";
       const entryMonth = entry.getAttribute("data-journal-month") || "";
+      const entryProcess = entry.getAttribute("data-journal-process") || "";
       const matchesQuery = !query || text.includes(query);
       const matchesCategory = !categoryValue || categories.includes(categoryValue);
       const matchesMonth = !monthValue || entryMonth === monthValue;
-      const shouldShow = matchesQuery && matchesCategory && matchesMonth;
+      const matchesProcess = !processValue || entryProcess === processValue;
+      const shouldShow = matchesQuery && matchesCategory && matchesMonth && matchesProcess;
 
       entry.hidden = !shouldShow;
       if (shouldShow) visible += 1;
@@ -1626,7 +1739,27 @@ function wireJournalSearch() {
   input?.addEventListener("input", applyFilters);
   category?.addEventListener("change", applyFilters);
   month?.addEventListener("change", applyFilters);
+  process?.addEventListener("change", applyFilters);
   applyFilters();
+}
+
+function getBitacoraProcessKeyForStudent(item = {}, student = {}, studentId = "") {
+  const aliases = [
+    studentId,
+    getStudentIdentity(student),
+    getStudentFallbackId(student),
+    student?.id,
+    student?.studentId,
+    student?.studentKey,
+    student?.canonicalStudentId,
+    ...(Array.isArray(student?.linkedStudentIds) ? student.linkedStudentIds : []),
+  ].filter(Boolean).map(String);
+  const overrides = item.studentOverrides || item.overrides || {};
+  for (const alias of aliases) {
+    const override = overrides[alias];
+    if (override?.processKey) return String(override.processKey);
+  }
+  return String(item?.process?.processKey || item?.processKey || "");
 }
 
 function wireBitacoraModals(bitacoras = []) {
@@ -3401,7 +3534,6 @@ async function renderTimeline(deps) {
         bitacoras = await api.listBitacorasByStudent(studentId, {
           max: 60,
           student: getStudent(ctx),
-          aliasIds: safeArray(ctx.studentIds),
         }).catch(() => []);
       }
     })(),
@@ -3731,7 +3863,7 @@ async function renderWorks(deps) {
   const html = `${viewHeader("Obras del proceso", studentSubtitle(ctx), { eyebrow: "Mi proceso" })}${stack(`
     <p class="note">Aquí ves las obras acordadas con tu docente. Puedes sugerir una nueva para que la revise antes de incorporarla al proceso.</p>
     <div class="grid">${columnHtml}</div>
-    ${card({ title: "Sugeridas por mí", subtitle: "Tus propuestas pendientes de revisión.", bodyHTML: suggestions.length ? `<div class="list">${suggestions.map((item) => itemRow({ title: uiSafeText(item.nombre), meta: item.estado === "pendiente" ? "Pendiente de revisión" : uiSafeText(item.estado), icon: "✦" })).join("")}</div>` : `<p class="note">Todavía no has sugerido una obra.</p>`, footerHTML: `<div class="stack" style="gap:8px"><input id="workSuggestionName" class="field__input" maxlength="300" placeholder="Nombre de la obra"/><textarea id="workSuggestionNotes" class="field__input" rows="2" maxlength="1000" placeholder="Cuéntale brevemente por qué te interesa (opcional)"></textarea><button type="button" id="workSuggestionSave" class="btn btn--primary">Sugerir obra</button></div>` })}
+    ${card({ title: "Sugeridas por mí", subtitle: "Propón una obra y tu docente la revisará antes de sumarla al proceso.", bodyHTML: suggestions.length ? `<div class="list">${suggestions.map((item) => itemRow({ title: uiSafeText(item.nombre), meta: item.estado === "pendiente" ? "Pendiente de revisión" : uiSafeText(item.estado), icon: "✦" })).join("")}</div>` : `<div class="work-suggestion__empty"><span class="work-suggestion__empty-icon" aria-hidden="true">♪</span><div><strong>Aún no tienes propuestas</strong><p>Comparte una obra que te emocione trabajar.</p></div></div>`, footerHTML: `<div class="work-suggestion"><div class="work-suggestion__intro"><span class="work-suggestion__eyebrow">Nueva propuesta</span><p>Con una breve razón ayudarás a tu docente a conocer mejor tu idea.</p></div><div class="work-suggestion__fields"><label class="work-suggestion__field" for="workSuggestionName"><span>Obra que quieres sugerir</span><input id="workSuggestionName" maxlength="300" placeholder="Ej. Viva la vida — Coldplay"/></label><label class="work-suggestion__field" for="workSuggestionNotes"><span>¿Por qué te interesa? <em>Opcional</em></span><textarea id="workSuggestionNotes" rows="3" maxlength="1000" placeholder="Cuéntanos qué te gusta de esta obra o qué te gustaría aprender."></textarea></label></div><div class="work-suggestion__actions"><p>Tu propuesta quedará pendiente de revisión.</p><button type="button" id="workSuggestionSave" class="btn btn--primary"><span aria-hidden="true">✦</span>Sugerir obra</button></div></div>` })}
   `)}`;
   return { html, afterRender: () => document.getElementById("workSuggestionSave")?.addEventListener("click", async () => {
     const button = document.getElementById("workSuggestionSave");

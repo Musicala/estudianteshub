@@ -1,1 +1,15 @@
 .firebase/
+.env
+**/.env
+node_modules/
+**/node_modules/
+firebase-debug.log
+firestore-debug.log
+*.log
+.DS_Store
+
+.cache/
+coverage/
+.claude/settings.local.json
+*.serviceaccount.json
+serviceAccountKey*.json

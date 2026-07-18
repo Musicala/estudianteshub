@@ -365,10 +365,14 @@ export function normalizeAccessProfile(raw = null) {
   ).toLowerCase();
   const canonicalStudentId = safeText(raw.studentId);
 
-  const studentIds = uniqueArray([
-    ...safeArray(raw.studentIds),
-    canonicalStudentId,
-  ].map((item) => safeText(item)));
+  const managedStudentIds = uniqueArray(
+    safeArray(raw.studentIds).map((item) => safeText(item))
+  );
+  // Un perfil de acudiente puede conservar un `studentId` histórico. Cuando
+  // el admin ya definió `studentIds`, esa lista es el vínculo vigente.
+  const studentIds = managedStudentIds.length
+    ? managedStudentIds
+    : uniqueArray([canonicalStudentId]);
 
   const active =
     raw.active !== false &&
