@@ -178,7 +178,8 @@ export function canStudentAccessHub(student = null) {
   const rip = student.rip && typeof student.rip === "object" ? student.rip : null;
   if (rip && typeof rip.canAccessHub === "boolean") return rip.canAccessHub;
   if (typeof student.canAccessHub === "boolean") return student.canAccessHub;
-  return true;
+  // Sin una política RIP publicada, el acceso queda pendiente y se deniega.
+  return false;
 }
 
 export function getLinkedStudentIds(profile = null) {
