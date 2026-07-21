@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-21.1-linked-email-existing-profile",
+  build: "2026-07-21.2-admin-preview-isolated",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -1063,10 +1063,8 @@ async function enterStudentView(studentId) {
   try {
     setBusy(true);
 
-    if (!state.studentIds.includes(id)) {
-      state.studentIds = [...state.studentIds, id];
-    }
-
+    // La previsualización es temporal. No se agrega a studentIds porque esa
+    // lista representa exclusivamente los procesos vinculados al correo.
     state.viewAsStudentId = id;
     await setActiveStudent(id);
 
