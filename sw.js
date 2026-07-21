@@ -14,7 +14,7 @@ const APP_NAME = "estudiantes-hub-musicala";
   Eso obliga al Service Worker a reinstalarse, limpiar el caché viejo y
   recargar a los estudiantes a la última versión (también en iPhone).
 */
-const CACHE_VERSION = "v2.1.1-rip-access-policy-2026-07-20.1";
+const CACHE_VERSION = "v2.1.2-linked-email-existing-profile-2026-07-21.1";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;

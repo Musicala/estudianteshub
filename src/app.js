@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-18.4-repertorio-alias-query",
+  build: "2026-07-21.1-linked-email-existing-profile",
 
   defaultRoute: "home",
   authWaitMs: 12000,

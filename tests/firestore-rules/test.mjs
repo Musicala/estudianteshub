@@ -221,6 +221,12 @@ await check("admin quita correo vinculado de portal", "ALLOW", async () => {
   await deleteDoc(doc(admin, "users/familia@test.com"));
   return 1;
 });
+await check("admin agrega estudiante a acudiente existente", "ALLOW", async () => {
+  await setDoc(doc(admin, "users/acudiente2@test.com"), {
+    studentIds: ["S1", "S2", "SX"], updatedAt: serverTimestamp(),
+  }, { merge: true });
+  return 1;
+});
 // 11. Estudiante NO lee otro perfil aunque conozca su ID
 await check("get students/SX (ID ajeno)", "DENY", async () => {
   const snap = await getDoc(doc(student, "students/SX"));
