@@ -31,10 +31,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM --- 2) Desplegar a Firebase Hosting + reglas de Firestore ---
+REM --- 2) Desplegar solamente Firebase Hosting ---
+REM Las reglas compartidas viven en Bitácoras de clase/firebase rules.
+REM Nunca se publican desde este HUB para no reemplazar la política canónica.
 echo.
-echo Desplegando a Firebase Hosting y reglas de Firestore...
-call firebase deploy --only hosting:estudianteshub,firestore:rules --project bitacoras-de-clase
+echo Desplegando a Firebase Hosting...
+call firebase deploy --only hosting:estudianteshub --project bitacoras-de-clase
 if errorlevel 1 (
   echo.
   echo ERROR en el deploy de Firebase. Revisa el mensaje de arriba.
