@@ -275,7 +275,7 @@
         id="navMoreBtn"
         class="bottom-nav__item bottom-nav__item--more"
         type="button"
-        data-route-group="practice messages events timeline profile"
+        data-route-group="works practice messages events timeline profile"
         aria-haspopup="dialog"
         aria-controls="navMoreSheet"
         aria-label="Ver más secciones"
@@ -291,6 +291,15 @@
       <div class="more-sheet__panel" role="menu">
         <div class="more-sheet__handle" aria-hidden="true"></div>
         <div class="more-sheet__title">Más secciones</div>
+
+        <a class="more-sheet__item" href="#/works" data-route="works" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">♪</span>
+          <span class="more-sheet__label">
+            <strong>Obras</strong>
+            <span>Revisa las obras de tu proceso musical.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
 
         <a class="more-sheet__item" href="#/practice" data-route="practice" data-close-more role="menuitem">
           <span class="more-sheet__icon" aria-hidden="true">⊙</span>
@@ -441,11 +450,11 @@
     aria-atomic="true"
   ></div>
 
-  <script type="module" src="./src/app.js?v=2026-07-18.4"></script>
+  <script type="module" src="./src/app.js?v=2026-07-24.1"></script>
 
   <script>
     (() => {
-      const FORCE_REFRESH_VERSION = '2026-07-18.4';
+      const FORCE_REFRESH_VERSION = '2026-07-24.1';
       const FORCE_REFRESH_KEY = 'estudiantes-hub-force-refresh';
       const canUseServiceWorker =
         'serviceWorker' in navigator &&
