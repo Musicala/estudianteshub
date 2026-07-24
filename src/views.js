@@ -787,6 +787,7 @@ async function renderHome(deps) {
               bodyHTML: journalCard(lastBitacora, { previewLength: 160 }),
               footerHTML: button("Ver bitácoras", { variant: "ghost", route: "journal", icon: "→" }),
             }) : ""}
+            ${worksCard}
           </div>
 
           ${badgesCard}

@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-21.2-admin-preview-isolated",
+  build: "2026-07-24.1-admin-preview-obras-estudiantes",
 
   defaultRoute: "home",
   authWaitMs: 12000,
