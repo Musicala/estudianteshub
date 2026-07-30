@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-24.1-obras-estudiantes",
+  build: "2026-07-30.1-recursos-perfil-consolidado",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -729,7 +729,13 @@ async function setActiveStudent(studentId, options = {}) {
     throw new Error("STUDENT_NOT_ALLOWED");
   }
 
-  const student = await getStudentById(id);
+  // La selección debe usar el mismo perfil consolidado que la carga inicial.
+  // En identidades ya reconciliadas el documento canónico contiene acceso/RIP
+  // y el académico contiene repertorio; leer solo uno ocultaba las obras.
+  const resolved = typeof api.getStudentsByIds === "function"
+    ? await api.getStudentsByIds([id])
+    : [];
+  const student = resolved[0] || await getStudentById(id);
 
   if (!student) {
     state.studentId = null;
