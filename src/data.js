@@ -731,6 +731,11 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
   assertNonEmptyString(id, "studentId");
   assertNonEmptyString(actor, "linkedBy");
   try {
+    // Un perfil visible puede ser el canónico, mientras que los procesos
+    // pedagógicos viven en registros académicos vinculados. Autorizamos todos
+    // esos IDs para que el portal conserve bitácoras, ruta y recursos.
+    const linkedStudent = (await getStudentsByIds([id]).catch(() => []))[0] || null;
+    const studentAccessIds = buildStudentAliasIds(linkedStudent, id);
     const existing = await getAccessProfileByEmail(normalizedEmail);
     if (existing) {
       const linkedIds = unique([
@@ -739,7 +744,7 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
         ...safeArray(existing.students),
       ].map((value) => safeText(value)));
 
-      if (linkedIds.includes(id)) {
+      if (studentAccessIds.every((studentAccessId) => linkedIds.includes(studentAccessId))) {
         // Repara perfiles de acceso heredados: al confirmar el mismo vínculo,
         // el identificador vigente debe ser el único que consume el HUB.
         // Así un `studentId` antiguo no puede volver a seleccionarse desde
@@ -752,7 +757,7 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
       }
 
       await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
-        studentIds: [...linkedIds, id],
+        studentIds: unique([...linkedIds, ...studentAccessIds]),
         updatedAt: serverTimestamp(),
       });
       return { email: normalizedEmail, status: "student-added" };
@@ -763,7 +768,7 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
       role: "acudiente",
       active: true,
       studentId: id,
-      studentIds: [id],
+      studentIds: studentAccessIds,
       portalAccessManaged: true,
       linkedBy: actor,
       linkedAt: serverTimestamp(),
