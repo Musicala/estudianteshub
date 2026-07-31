@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-30.4-vinculos-con-aliases",
+  build: "2026-07-30.5-recursos-perfil-cache",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -732,23 +732,11 @@ async function setActiveStudent(studentId, options = {}) {
   // La selección debe usar el mismo perfil consolidado que la carga inicial.
   // En identidades ya reconciliadas el documento canónico contiene acceso/RIP
   // y el académico contiene repertorio; leer solo uno ocultaba las obras.
-  const authorizedIds = state.studentIds.includes(id)
-    ? state.studentIds
-    : [id];
-  const resolved = typeof api.getStudentsByIds === "function"
-    ? await api.getStudentsByIds(authorizedIds)
-    : [];
-  const student =
-    resolved.find((candidate) =>
-      [
-        candidate?.id,
-        candidate?.studentId,
-        candidate?.canonicalStudentId,
-        ...(Array.isArray(candidate?.linkedStudentIds) ? candidate.linkedStudentIds : []),
-      ].some((candidateId) => safeText(candidateId) === id)
-    ) ||
-    resolved[0] ||
-    await getStudentById(id);
+  // `preloadStudentsIfNeeded` ya resolvió y guardó los aliases académicos.
+  // No se debe releer solo el documento canónico al cambiar de vista, porque
+  // ese documento puede no traer el proceso (por ejemplo, Guitarra).
+  const cachedStudent = state.studentsById.get(id);
+  const student = cachedStudent || await getStudentById(id);
 
   if (!student) {
     state.studentId = null;
