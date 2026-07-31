@@ -18,7 +18,7 @@ import {
   humanAuthError,
 } from "./auth.js";
 
-import * as api from "./data.js";
+import * as api from "./data.js?v=2026-07-30.3";
 
 import { renderRoute } from "./views.js";
 
@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-30.2-recursos-alias-autorizados",
+  build: "2026-07-30.3-vinculos-correo-multiples",
 
   defaultRoute: "home",
   authWaitMs: 12000,

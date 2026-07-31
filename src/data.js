@@ -745,23 +745,17 @@ export async function linkPortalAccess({ email, studentId, linkedBy = "" } = {})
         // Así un `studentId` antiguo no puede volver a seleccionarse desde
         // localStorage ni mostrar el repertorio de otra persona.
         await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
-          studentId: id,
-          studentKey: id,
-          studentIds: [id],
-          portalAccessManaged: true,
+          studentIds: linkedIds,
           updatedAt: serverTimestamp(),
         });
-        return { email: normalizedEmail, status: "student-canonicalized" };
+        return { email: normalizedEmail, status: "already-linked" };
       }
 
       await updateDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
-        studentId: id,
-        studentKey: id,
-        studentIds: [id],
-        portalAccessManaged: true,
+        studentIds: [...linkedIds, id],
         updatedAt: serverTimestamp(),
       });
-      return { email: normalizedEmail, status: "student-canonicalized" };
+      return { email: normalizedEmail, status: "student-added" };
     }
 
     await setDoc(doc(db, COLLECTIONS.users, normalizedEmail), {
