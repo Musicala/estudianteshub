@@ -535,6 +535,15 @@ service cloud.firestore {
       allow update, delete: if isAdmin() || isTeacher();
     }
 
+    function validStudentDiagnosticCreate(diagnosticId) {
+      return request.resource.data.keys().hasOnly(['studentId', 'studentName', 'type', 'answers', 'version', 'createdAt', 'updatedAt']) && request.resource.data.studentId in linkedStudentIds() && request.resource.data.studentName is string && request.resource.data.studentName.size() <= 160 && request.resource.data.type in ['theory', 'practice'] && diagnosticId == request.resource.data.studentId + '__' + request.resource.data.type && request.resource.data.answers is map && request.resource.data.answers.size() > 0 && request.resource.data.answers.size() <= 16 && request.resource.data.version == 1 && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+    }
+    match /student_diagnostics/{diagnosticId} {
+      allow read: if isAdmin() || isTeacher() || (isActiveStudent() && resource.data.studentId in linkedStudentIds());
+      allow create: if isActiveStudent() && validStudentDiagnosticCreate(diagnosticId);
+      allow update, delete: if isAdmin();
+    }
+
     // Bitácora de sincronizaciones entre proyectos (escrita solo por los
     // backends via Admin SDK; el cliente únicamente puede consultarla).
     match /sync_logs/{logId} {

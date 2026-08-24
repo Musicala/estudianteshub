@@ -5270,6 +5270,17 @@ textarea.input {
   font-size: var(--fs-14);
 }
 
+.diagnostic-form { display: grid; gap: 16px; }
+.diagnostic-field { display: grid; gap: 7px; color: var(--text); font-weight: 650; }
+.diagnostic-field em { color: var(--danger, #b42318); font-style: normal; }
+.diagnostic-field input, .diagnostic-field textarea { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-raised); color: var(--text); font: inherit; font-weight: 400; }
+.diagnostic-field textarea { resize: vertical; }
+.diagnostic-complete { margin-bottom: 14px; color: var(--success, #067647); font-weight: 700; }
+.diagnostic-answers { display: grid; gap: 12px; }
+.diagnostic-answer { padding: 12px; border-radius: var(--r-sm); background: var(--surface-raised); border: 1px solid var(--line); }
+.diagnostic-answer strong { display: block; margin-bottom: 6px; font-size: var(--fs-14); }
+.diagnostic-answer a { color: var(--mozart); font-weight: 650; }
+
 @media (max-width: 720px) {
   .biblioGridFolders { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .biblioGrid { grid-template-columns: 1fr; gap: 10px; }

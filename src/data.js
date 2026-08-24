@@ -866,6 +866,26 @@ export async function createStudentWorkSuggestion(studentId, student, payload = 
   return { id: ref.id, studentId: id, nombre, estado: "pendiente" };
 }
 
+const DIAGNOSTIC_TYPES = new Set(["theory", "practice"]);
+function normalizeDiagnosticAnswers(answers = {}) {
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) return {};
+  return Object.fromEntries(Object.entries(answers).slice(0, 16).map(([key, value]) => [safeText(key).slice(0, 80), safeText(value).slice(0, 4000)]).filter(([key]) => key));
+}
+function diagnosticDocumentId(studentId, type) { return `${studentId}__${type}`; }
+export async function getStudentDiagnostics(studentId) {
+  const id = safeText(studentId); if (!id) return { theory: null, practice: null };
+  const entries = await Promise.all(["theory", "practice"].map(async (type) => { const snapshot = await getDoc(doc(db, COLLECTIONS.studentDiagnostics, diagnosticDocumentId(id, type))); return [type, snapshot.exists() ? normalizeDocBase(snapshot.id, snapshot.data()) : null]; }));
+  return Object.fromEntries(entries);
+}
+export async function createStudentDiagnostic(studentId, student, type, answers = {}) {
+  const id = safeText(studentId); const diagnosticType = safeText(type).toLowerCase(); const normalizedAnswers = normalizeDiagnosticAnswers(answers);
+  if (!id || !DIAGNOSTIC_TYPES.has(diagnosticType)) throw new Error("Diagnóstico no válido.");
+  if (!Object.keys(normalizedAnswers).length) throw new Error("Completa las respuestas del diagnóstico.");
+  const reference = doc(db, COLLECTIONS.studentDiagnostics, diagnosticDocumentId(id, diagnosticType));
+  if ((await getDoc(reference)).exists()) throw new Error("Este diagnóstico ya fue completado y no puede repetirse.");
+  await setDoc(reference, { studentId: id, studentName: safeText(student?.nombre || student?.name || "Estudiante").slice(0, 160), type: diagnosticType, answers: normalizedAnswers, version: 1, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+}
+
 function getStudentIdentityCandidates(student = {}) {
   return unique([
     student.id,

@@ -125,6 +125,7 @@ export const COLLECTIONS = Object.freeze({
   studentMessages: "student_messages",
   studentComments: "student_comments",
   studentEvidence: "student_evidence",
+  studentDiagnostics: "student_diagnostics",
 });
 
 export const DOCS = Object.freeze({
@@ -193,6 +194,7 @@ export const ROUTES = Object.freeze({
   messages: "messages",
   timeline: "timeline",
   report: "report",
+  diagnostics: "diagnostics",
 });
 
 export const ROUTE_LIST = Object.freeze([
@@ -208,6 +210,7 @@ export const ROUTE_LIST = Object.freeze([
   ROUTES.messages,
   ROUTES.timeline,
   ROUTES.report,
+  ROUTES.diagnostics,
 ]);
 
 export const ROUTE_ALIASES = Object.freeze({
@@ -253,6 +256,8 @@ export const ROUTE_ALIASES = Object.freeze({
 
   reporte: ROUTES.report,
   informe: ROUTES.report,
+  diagnosticos: ROUTES.diagnostics,
+  "diagnósticos": ROUTES.diagnostics,
 
   // Compatibilidad con Estudiantes HUB anterior
   classes: ROUTES.journal,
@@ -271,6 +276,7 @@ export const ROUTE_LABELS = Object.freeze({
   [ROUTES.messages]: "Mensajes",
   [ROUTES.timeline]: "Línea del tiempo",
   [ROUTES.report]: "Reporte mensual",
+  [ROUTES.diagnostics]: "Diagnósticos iniciales",
 });
 
 export const ROUTE_DESCRIPTIONS = Object.freeze({
@@ -286,6 +292,7 @@ export const ROUTE_DESCRIPTIONS = Object.freeze({
   [ROUTES.messages]: "Comunícate con tu docente directamente.",
   [ROUTES.timeline]: "Mira todo tu proceso en orden cronológico.",
   [ROUTES.report]: "Genera un informe de tu progreso mensual.",
+  [ROUTES.diagnostics]: "Completa una sola vez tus diagnósticos iniciales y consulta tus respuestas.",
 });
 
 /* =============================================================================
