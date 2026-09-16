@@ -21,7 +21,7 @@
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { readFileSync } from "node:fs";
 import {
-  collection, query, where, getDocs, getDoc, doc, setDoc, deleteDoc, serverTimestamp,
+  collection, query, where, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, serverTimestamp,
 } from "firebase/firestore";
 
 const env = await initializeTestEnvironment({
@@ -191,12 +191,52 @@ const pausa = env
   .authenticatedContext("uid-pau", { email: "pausa@test.com", email_verified: true })
   .firestore();
 
+// Un administrador activo también puede figurar como docente en el directorio
+// de mensajes. Debe poder ser destinatario sin volverlo un canal público.
+await check("estudiante abre y escribe a docente con rol admin", "ALLOW", async () => {
+  await setDoc(doc(student, "student_messages/S1"), {
+    studentId: "S1",
+    studentName: "Test",
+    teacherEmail: "admin@test.com",
+    teacherName: "Admin",
+    teacherUnread: true,
+    updatedAt: serverTimestamp(),
+  });
+  await addDoc(collection(student, "student_messages/S1/messages"), {
+    studentId: "S1",
+    text: "Hola profe",
+    senderRole: "student",
+    senderName: "Test",
+    senderEmail: "estudiante@test.com",
+    teacherEmail: "admin@test.com",
+    read: false,
+    createdAt: serverTimestamp(),
+  });
+  await setDoc(doc(student, "student_messages/S1"), {
+    studentId: "S1",
+    teacherEmail: "admin@test.com",
+    lastMessage: "Hola profe",
+    lastSenderRole: "student",
+    teacherUnread: true,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  return 1;
+});
+
 // 10b. Un admin puede vincular y quitar un correo de portal, pero nunca crear
 // perfiles internos ni un estudiante puede otorgarse acceso por sí mismo.
 await check("admin crea correo vinculado de portal", "ALLOW", async () => {
   await setDoc(doc(admin, "users/familia@test.com"), {
     email: "familia@test.com", role: "acudiente", active: true,
     studentId: "S1", studentIds: ["S1"], portalAccessManaged: true,
+    linkedBy: "admin@test.com", linkedAt: new Date(), updatedAt: new Date(),
+  });
+  return 1;
+});
+await check("admin crea correo con alias académicos del mismo estudiante", "ALLOW", async () => {
+  await setDoc(doc(admin, "users/familia-alias@test.com"), {
+    email: "familia-alias@test.com", role: "acudiente", active: true,
+    studentId: "S1", studentIds: ["S1", "stu_S1"], portalAccessManaged: true,
     linkedBy: "admin@test.com", linkedAt: new Date(), updatedAt: new Date(),
   });
   return 1;
@@ -324,6 +364,29 @@ await check("pausa corta lee bitácoras", "ALLOW", async () => {
   const snap = await getDocs(query(bitacoras(pausa),
     where("studentIds", "array-contains", "S1")));
   return snap.size;
+});
+
+// 27-30. Diagnósticos: se crean una vez, solo el dueño/equipo los consulta.
+const diagnosticPayload = {
+  studentId: "S1", studentName: "Test", type: "theory",
+  answers: { notes: "do re mi" }, version: 1,
+  createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+};
+await check("estudiante crea su diagnóstico una vez", "ALLOW", async () => {
+  await setDoc(doc(student, "student_diagnostics/S1__theory"), diagnosticPayload);
+  return 1;
+});
+await check("estudiante lee su diagnóstico", "ALLOW", async () => {
+  const snap = await getDoc(doc(student, "student_diagnostics/S1__theory"));
+  return snap.exists() ? 1 : 0;
+});
+await check("estudiante no repite ni edita diagnóstico", "DENY", async () => {
+  await setDoc(doc(student, "student_diagnostics/S1__theory"), { ...diagnosticPayload, answers: { notes: "cambiado" } });
+  return 1;
+});
+await check("estudiante no lee diagnóstico ajeno", "DENY", async () => {
+  const snap = await getDoc(doc(student, "student_diagnostics/SX__theory"));
+  return snap.exists() ? 1 : 0;
 });
 
 await env.cleanup();

@@ -95,6 +95,27 @@ export const LIBRARY_COLLECTIONS = Object.freeze({
   resources: "recursos",
 });
 
+/* =============================================================================
+  Firebase secundario — currículo publicado
+  Proyecto: mapa-de-experiencias
+
+  El HUB solo lee el snapshot público `published_curricula/piano`. El progreso
+  individual permanece en el proyecto principal `bitacoras-de-clase`.
+============================================================================= */
+
+export const CURRICULUM_FIREBASE_CONFIG = Object.freeze({
+  apiKey: "AIzaSyACJ_tXf8znOlNC2bT3OlxTlpm-i2FkOl8",
+  authDomain: "mapa-de-experiencias.firebaseapp.com",
+  projectId: "mapa-de-experiencias",
+  storageBucket: "mapa-de-experiencias.firebasestorage.app",
+  messagingSenderId: "131491272175",
+  appId: "1:131491272175:web:4b4a3d1efa8b3b0695121a",
+});
+
+export const CURRICULUM_COLLECTIONS = Object.freeze({
+  published: "published_curricula",
+});
+
 export const FIREBASE_OPTIONS = Object.freeze({
   sdkVersion: "10.12.5",
   useEmulators: false,
@@ -125,6 +146,7 @@ export const COLLECTIONS = Object.freeze({
   studentMessages: "student_messages",
   studentComments: "student_comments",
   studentEvidence: "student_evidence",
+  studentDiagnostics: "student_diagnostics",
 });
 
 export const DOCS = Object.freeze({
@@ -193,6 +215,7 @@ export const ROUTES = Object.freeze({
   messages: "messages",
   timeline: "timeline",
   report: "report",
+  diagnostics: "diagnostics",
 });
 
 export const ROUTE_LIST = Object.freeze([
@@ -208,6 +231,7 @@ export const ROUTE_LIST = Object.freeze([
   ROUTES.messages,
   ROUTES.timeline,
   ROUTES.report,
+  ROUTES.diagnostics,
 ]);
 
 export const ROUTE_ALIASES = Object.freeze({
@@ -253,6 +277,10 @@ export const ROUTE_ALIASES = Object.freeze({
 
   reporte: ROUTES.report,
   informe: ROUTES.report,
+  diagnosticos: ROUTES.diagnostics,
+  "diagnósticos": ROUTES.diagnostics,
+  diagnostico: ROUTES.diagnostics,
+  "diagnóstico": ROUTES.diagnostics,
 
   // Compatibilidad con Estudiantes HUB anterior
   classes: ROUTES.journal,
@@ -271,6 +299,7 @@ export const ROUTE_LABELS = Object.freeze({
   [ROUTES.messages]: "Mensajes",
   [ROUTES.timeline]: "Línea del tiempo",
   [ROUTES.report]: "Reporte mensual",
+  [ROUTES.diagnostics]: "Diagnósticos iniciales",
 });
 
 export const ROUTE_DESCRIPTIONS = Object.freeze({
@@ -286,6 +315,7 @@ export const ROUTE_DESCRIPTIONS = Object.freeze({
   [ROUTES.messages]: "Comunícate con tu docente directamente.",
   [ROUTES.timeline]: "Mira todo tu proceso en orden cronológico.",
   [ROUTES.report]: "Genera un informe de tu progreso mensual.",
+  [ROUTES.diagnostics]: "Completa una sola vez tus diagnósticos iniciales y consulta tus respuestas.",
 });
 
 /* =============================================================================

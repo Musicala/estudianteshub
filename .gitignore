@@ -13,3 +13,13 @@ coverage/
 .claude/settings.local.json
 *.serviceaccount.json
 serviceAccountKey*.json
+
+# Herramientas y publicaciones locales
+.claude/
+.codex/
+.agents/
+.vscode/
+.live-check/
+.routine-publish/
+*.bak-*
+firestore.rules.PUBLICADO-*

@@ -73,12 +73,13 @@ service cloud.firestore {
         linkedStudentIds().size() > 0;
     }
 
+    // Accesos familiares adicionales creados exclusivamente por un admin desde
+    // Estudiantes HUB. Nunca concede acceso a perfiles internos ni permite que
+    // un estudiante se asigne a sí mismo.
     function isPortalAccessRole(role) {
       return role in ["student", "estudiante", "acudiente", "guardian", "parent"];
     }
 
-    // Un admin puede crear accesos de portal, nunca perfiles internos ni
-    // modificar campos de identidad publicados por los backends.
     function validManagedPortalAccess(emailKey) {
       return emailKey == request.resource.data.email &&
         request.resource.data.email is string &&
@@ -88,9 +89,13 @@ service cloud.firestore {
         request.resource.data.portalAccessManaged == true &&
         request.resource.data.studentId is string &&
         request.resource.data.studentId != '' &&
+        // Un estudiante puede tener un expediente académico y un ID canónico.
+        // El portal entrega ambos para conservar bitácoras y recursos; el ID
+        // visible sigue siendo obligatorio y la lista se mantiene acotada.
         request.resource.data.studentIds is list &&
-        request.resource.data.studentIds.size() == 1 &&
-        request.resource.data.studentIds[0] == request.resource.data.studentId &&
+        request.resource.data.studentIds.size() >= 1 &&
+        request.resource.data.studentIds.size() <= 10 &&
+        request.resource.data.studentIds.hasAll([request.resource.data.studentId]) &&
         request.resource.data.linkedBy == authEmail() &&
         request.resource.data.keys().hasOnly([
           'email', 'role', 'active', 'studentId', 'studentIds',
@@ -98,9 +103,35 @@ service cloud.firestore {
         ]);
     }
 
-    // El mismo acudiente puede tener varios hijos. En perfiles existentes se
-    // permite modificar solo la lista de estudiantes, conservando rol, estado
-    // y todos los datos publicados por los backends.
+    // Perfiles internos de docentes administrados desde Bitácoras de clase.
+    // Se mantienen separados de los accesos de estudiantes/acudientes.
+    function validManagedTeacherAccess(emailKey) {
+      return emailKey == request.resource.data.email &&
+        request.resource.data.email is string &&
+        request.resource.data.email.lower() == emailKey &&
+        isTeacherRole(request.resource.data.role) &&
+        request.resource.data.active is bool &&
+        request.resource.data.teacherAccessManaged == true &&
+        request.resource.data.keys().hasOnly([
+          'email', 'role', 'active', 'teacherAccessManaged',
+          'displayName', 'linkedBy', 'linkedAt', 'updatedAt'
+        ]);
+    }
+
+    function validManagedTeacherAccessUpdate(emailKey) {
+      return resource.data.teacherAccessManaged == true &&
+        request.resource.data.email == emailKey &&
+        request.resource.data.email is string &&
+        request.resource.data.email.lower() == emailKey &&
+        isTeacherRole(request.resource.data.role) &&
+        request.resource.data.active is bool &&
+        request.resource.data.teacherAccessManaged == true &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'email', 'role', 'active', 'teacherAccessManaged',
+          'displayName', 'linkedBy', 'linkedAt', 'updatedAt'
+        ]);
+    }
+
     function validPortalStudentLinksUpdate() {
       return isPortalAccessRole(resource.data.get('role', '').lower()) &&
         request.resource.data.get('role', '').lower() == resource.data.get('role', '').lower() &&
@@ -148,19 +179,132 @@ service cloud.firestore {
 
     match /users/{emailKey} {
       allow read: if isAdmin() || (isSignedIn() && authEmail() == emailKey);
-      allow create: if isAdmin() && validManagedPortalAccess(emailKey);
+      allow create: if isAdmin() &&
+        (validManagedPortalAccess(emailKey) || validManagedTeacherAccess(emailKey));
       allow update: if isAdmin() &&
         (
           (resource.data.portalAccessManaged == true && validManagedPortalAccess(emailKey)) ||
+          validManagedTeacherAccessUpdate(emailKey) ||
           validPortalStudentLinksUpdate()
         );
-      allow delete: if isAdmin() && resource.data.get('portalAccessManaged', false) == true;
+      allow delete: if isAdmin() &&
+        (resource.data.get('portalAccessManaged', false) == true ||
+         resource.data.get('teacherAccessManaged', false) == true);
     }
 
     match /app_config/{docId} {
       // Catálogos y configuración del portal son datos compartidos de la app.
       allow read: if isAdmin() || isTeacher() || isActiveStudent();
       allow write: if isAdmin();
+    }
+
+    function identityDocumentValue(studentId) {
+      let data = get(/databases/$(database)/documents/students/$(studentId)).data;
+      return data.get('documentFingerprint',
+        data.get('documento',
+          data.get('numeroDocumento',
+            data.get('identificacion', data.get('cc', '')))));
+    }
+
+    function identityMembersReady(canonicalStudentId, academicRecordId) {
+      return getAfter(/databases/$(database)/documents/student_identity_link_members/$(canonicalStudentId)).data.canonicalStudentId == canonicalStudentId &&
+        getAfter(/databases/$(database)/documents/student_identity_link_members/$(academicRecordId)).data.canonicalStudentId == canonicalStudentId;
+    }
+
+    function validIdentityLink(canonicalStudentId) {
+      let academicRecordId = request.resource.data.academicRecordId;
+      let canonicalDocument = identityDocumentValue(canonicalStudentId);
+      let academicDocument = identityDocumentValue(academicRecordId);
+      return request.resource.data.keys().hasAll([
+          'canonicalStudentId', 'academicRecordId', 'linkedStudentIds',
+          'status', 'linkMethod', 'linkedAt', 'linkedBy'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'canonicalStudentId', 'academicRecordId', 'linkedStudentIds',
+          'status', 'linkMethod', 'linkedAt', 'linkedBy'
+        ]) &&
+        request.resource.data.canonicalStudentId == canonicalStudentId &&
+        !canonicalStudentId.matches('^stu_.*') &&
+        academicRecordId is string &&
+        academicRecordId.matches('^stu_.*') &&
+        canonicalStudentId != academicRecordId &&
+        request.resource.data.linkedStudentIds is list &&
+        request.resource.data.linkedStudentIds.size() >= 2 &&
+        request.resource.data.linkedStudentIds.hasAll([canonicalStudentId, academicRecordId]) &&
+        request.resource.data.status == 'confirmed' &&
+        request.resource.data.linkMethod == 'admin-confirmed' &&
+        request.resource.data.linkedAt == request.time &&
+        request.resource.data.linkedBy == request.auth.uid &&
+        exists(/databases/$(database)/documents/students/$(canonicalStudentId)) &&
+        exists(/databases/$(database)/documents/students/$(academicRecordId)) &&
+        (canonicalDocument == '' || academicDocument == '' || canonicalDocument == academicDocument) &&
+        identityMembersReady(canonicalStudentId, academicRecordId);
+    }
+
+    function validIdentityMember(studentId) {
+      let canonicalStudentId = request.resource.data.canonicalStudentId;
+      return request.resource.data.keys().hasAll([
+          'studentId', 'canonicalStudentId', 'status', 'linkedAt'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'studentId', 'canonicalStudentId', 'status', 'linkedAt'
+        ]) &&
+        request.resource.data.studentId == studentId &&
+        canonicalStudentId is string &&
+        request.resource.data.status == 'confirmed' &&
+        request.resource.data.linkedAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(studentId)) &&
+        getAfter(/databases/$(database)/documents/student_identity_links/$(canonicalStudentId)).data.status == 'confirmed' &&
+        getAfter(/databases/$(database)/documents/student_identity_links/$(canonicalStudentId)).data.linkedStudentIds.hasAny([studentId]) &&
+        (!exists(/databases/$(database)/documents/student_identity_link_members/$(studentId)) ||
+          resource.data.canonicalStudentId == canonicalStudentId);
+    }
+
+    function validIdentityRejection() {
+      return request.resource.data.keys().hasAll([
+          'canonicalStudentId', 'academicRecordId', 'linkedStudentIds',
+          'status', 'linkMethod', 'reviewedAt', 'reviewedBy'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'canonicalStudentId', 'academicRecordId', 'linkedStudentIds',
+          'status', 'linkMethod', 'reviewedAt', 'reviewedBy'
+        ]) &&
+        request.resource.data.canonicalStudentId is string &&
+        request.resource.data.academicRecordId is string &&
+        request.resource.data.academicRecordId.matches('^stu_.*') &&
+        request.resource.data.canonicalStudentId != request.resource.data.academicRecordId &&
+        request.resource.data.linkedStudentIds == [
+          request.resource.data.canonicalStudentId,
+          request.resource.data.academicRecordId
+        ] &&
+        request.resource.data.status == 'rejected' &&
+        request.resource.data.linkMethod == 'admin-rejected' &&
+        request.resource.data.reviewedAt == request.time &&
+        request.resource.data.reviewedBy == request.auth.uid &&
+        exists(/databases/$(database)/documents/students/$(request.resource.data.canonicalStudentId)) &&
+        exists(/databases/$(database)/documents/students/$(request.resource.data.academicRecordId));
+    }
+
+    match /student_identity_links/{canonicalStudentId} {
+      allow read: if isAdmin() || isTeacher();
+      allow create: if isAdmin() && validIdentityLink(canonicalStudentId);
+      allow update: if isAdmin() &&
+        resource.data.canonicalStudentId == canonicalStudentId &&
+        resource.data.academicRecordId == request.resource.data.academicRecordId &&
+        validIdentityLink(canonicalStudentId);
+      allow delete: if false;
+    }
+
+    match /student_identity_link_reviews/{reviewId} {
+      allow read: if isAdmin() || isTeacher();
+      allow create, update: if isAdmin() && validIdentityRejection();
+      allow delete: if isAdmin();
+    }
+
+    match /student_identity_link_members/{studentId} {
+      allow read: if false;
+      allow create, update: if isAdmin() && validIdentityMember(studentId);
+      allow delete: if false;
     }
 
     // Agenda publicada para los clientes autenticados con perfil activo.
@@ -203,9 +347,35 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    function isManagedMapProgress(data) {
+      return data.managedByMap == true &&
+        data.routeTemplateId in ['mapa-piano', 'mapa-guitarra'];
+    }
+
+    function validManagedMapProgress(progressId, data) {
+      return isManagedMapProgress(data) &&
+        data.studentId is string && data.studentKey is string &&
+        !data.studentId.matches('^stu_.*') &&
+        data.studentKey == data.studentId &&
+        progressId == data.studentId + '__' + data.routeTemplateId &&
+        ((data.routeTemplateId == 'mapa-piano' && data.progressEpoch == 'mapa-piano-20260815-v1') ||
+         (data.routeTemplateId == 'mapa-guitarra' && data.progressEpoch == 'mapa-guitarra-20260831-v1'));
+    }
+
+    function keepsManagedMapProgressIdentity(progressId) {
+      return !isManagedMapProgress(resource.data) ||
+        (validManagedMapProgress(progressId, request.resource.data) &&
+         request.resource.data.studentId == resource.data.studentId &&
+         request.resource.data.studentKey == resource.data.studentKey &&
+         request.resource.data.routeTemplateId == resource.data.routeTemplateId &&
+         request.resource.data.progressEpoch == resource.data.progressEpoch);
+    }
+
     match /student_route_progress/{routeId} {
       allow read: if isAdmin() || isTeacher() || studentOwnsRoute(routeId);
-      allow create, update: if isAdmin() || isTeacher();
+      allow create: if isAdmin() || (isTeacher() &&
+        (!isManagedMapProgress(request.resource.data) || validManagedMapProgress(routeId, request.resource.data)));
+      allow update: if isAdmin() || (isTeacher() && keepsManagedMapProgressIdentity(routeId));
       allow delete: if isAdmin();
     }
 
@@ -370,7 +540,7 @@ service cloud.firestore {
               request.resource.data.processes[0].label
           )
         ) &&
-        validActorPedagogicalAudit();
+        validFixedPedagogicalAudit('profile_processes');
     }
 
     function validProfileFieldsUpdate() {
@@ -473,10 +643,6 @@ service cloud.firestore {
           request.resource.data.repertoire &&
         request.resource.data.repertorioProceso ==
           request.resource.data.repertoireProgress &&
-        validRepertoirePayload(
-          request.resource.data.repertorioEscogido,
-          request.resource.data.repertorioProceso
-        ) &&
         validFixedPedagogicalAudit('profile_repertoire');
     }
 
@@ -495,7 +661,13 @@ service cloud.firestore {
               : changedStudentFieldsInclude([
                     'processes', 'area', 'instrumento', 'programa'
                   ])
-                ? validProcessesUpdate()
+                // Los expedientes históricos pueden tener estructuras de
+                // proceso previas al esquema actual. El administrador puede
+                // normalizarlas, pero solo dentro de esta lista pedagógica.
+                ? changedStudentFieldsAreOnly([
+                    'processes', 'area', 'instrumento', 'programa',
+                    'updatedAt', 'updatedBy'
+                  ]) && validFixedPedagogicalAudit('profile_processes')
                 : validProfileFieldsUpdate()
         );
     }
@@ -516,13 +688,13 @@ service cloud.firestore {
       // aparecen en ninguna allowlist y permanecen exclusivas del backend.
       allow update: if
         (isAdmin() && validAdminPedagogicalUpdate()) ||
-        (teacherCanEditStudent() && validTeacherPedagogicalUpdate());
+        (isTeacher() && validTeacherPedagogicalUpdate());
 
       allow create, delete: if false;
     }
 
-    // Propuestas creadas desde el HUB. No forman parte de las obras oficiales
-    // hasta que un docente las acepta y las incorpora al proceso.
+    // Propuestas creadas desde Estudiantes HUB. Solo el equipo las convierte
+    // en una obra oficial del proceso.
     match /student_work_suggestions/{suggestionId} {
       allow read: if isAdmin() || isTeacher() ||
         (isActiveStudent() && resource.data.studentId in linkedStudentIds());
@@ -533,6 +705,30 @@ service cloud.firestore {
         request.resource.data.notas is string && request.resource.data.notas.size() <= 1000 &&
         request.resource.data.estado == 'pendiente';
       allow update, delete: if isAdmin() || isTeacher();
+    }
+
+    // Un estudiante entrega cada diagnóstico una vez. El equipo pedagógico
+    // puede consultarlo, pero ningún otro estudiante puede ver sus respuestas.
+    function validStudentDiagnosticCreate(diagnosticId) {
+      return request.resource.data.keys().hasOnly([
+          'studentId', 'studentName', 'type', 'answers', 'version',
+          'createdAt', 'updatedAt'
+        ]) &&
+        request.resource.data.studentId in linkedStudentIds() &&
+        request.resource.data.studentName is string && request.resource.data.studentName.size() <= 160 &&
+        request.resource.data.type in ['theory', 'practice'] &&
+        diagnosticId == request.resource.data.studentId + '__' + request.resource.data.type &&
+        request.resource.data.answers is map && request.resource.data.answers.size() > 0 && request.resource.data.answers.size() <= 16 &&
+        request.resource.data.version == 1 &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time;
+    }
+
+    match /student_diagnostics/{diagnosticId} {
+      allow read: if isAdmin() || isTeacher() ||
+        (isActiveStudent() && resource.data.studentId in linkedStudentIds());
+      allow create: if isActiveStudent() && validStudentDiagnosticCreate(diagnosticId);
+      allow update, delete: if isAdmin();
     }
 
     // Bitácora de sincronizaciones entre proyectos (escrita solo por los
@@ -615,7 +811,13 @@ service cloud.firestore {
     function isActiveTeacherEmail(email) {
       return email is string &&
         email != "" &&
-        isTeacherRole(targetTeacherData(email).get('role', '').lower()) &&
+        // El directorio docente también publica administradores que enseñan.
+        // En users/{correo} esos perfiles conservan role: "admin", por lo
+        // que no se pueden excluir al validar el destinatario del hilo.
+        (
+          isTeacherRole(targetTeacherData(email).get('role', '').lower()) ||
+          isAdminRole(targetTeacherData(email).get('role', '').lower())
+        ) &&
         targetTeacherData(email).get('active', true) != false;
     }
 

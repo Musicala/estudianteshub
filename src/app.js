@@ -18,7 +18,7 @@ import {
   humanAuthError,
 } from "./auth.js";
 
-import * as api from "./data.js?v=2026-07-30.4";
+import * as api from "./data.js?v=2026-08-31.4-mapa-violin";
 
 import { renderRoute } from "./views.js";
 
@@ -63,7 +63,7 @@ import {
 
 const APP = Object.freeze({
   name: "Estudiantes HUB · Musicala",
-  build: "2026-07-30.5-recursos-perfil-cache",
+  build: "2026-08-23.1-diagnosticos-iniciales",
 
   defaultRoute: "home",
   authWaitMs: 12000,
@@ -82,6 +82,7 @@ const APP = Object.freeze({
     "messages",
     "timeline",
     "report",
+    "diagnostics",
   ]),
 
   routeAliases: Object.freeze({
@@ -107,6 +108,10 @@ const APP = Object.freeze({
     historial: "timeline",
     reporte: "report",
     informe: "report",
+    diagnosticos: "diagnostics",
+    "diagnósticos": "diagnostics",
+    diagnostico: "diagnostics",
+    "diagnóstico": "diagnostics",
 
     // Compatibilidad con versiones anteriores
     classes: "journal",
@@ -732,9 +737,6 @@ async function setActiveStudent(studentId, options = {}) {
   // La selección debe usar el mismo perfil consolidado que la carga inicial.
   // En identidades ya reconciliadas el documento canónico contiene acceso/RIP
   // y el académico contiene repertorio; leer solo uno ocultaba las obras.
-  // `preloadStudentsIfNeeded` ya resolvió y guardó los aliases académicos.
-  // No se debe releer solo el documento canónico al cambiar de vista, porque
-  // ese documento puede no traer el proceso (por ejemplo, Guitarra).
   const cachedStudent = state.studentsById.get(id);
   const student = cachedStudent || await getStudentById(id);
 

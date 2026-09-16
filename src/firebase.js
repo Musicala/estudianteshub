@@ -38,6 +38,7 @@ import {
   CONFIG,
   FIREBASE_CONFIG,
   LIBRARY_FIREBASE_CONFIG,
+  CURRICULUM_FIREBASE_CONFIG,
   firebaseConfig,
   assertFirebaseConfig,
 } from "./config.js";
@@ -99,6 +100,20 @@ function initLibraryApp() {
 
 export const libraryApp = initLibraryApp();
 export const libraryDb = getFirestore(libraryApp);
+
+/* =============================================================================
+  App secundaria — Mapa de Experiencias (currículo publicado, solo lectura)
+============================================================================= */
+
+function initCurriculumApp() {
+  const existing = getApps().find((item) => item.name === "mapa-curriculum");
+  if (existing) return existing;
+
+  return initializeApp(CURRICULUM_FIREBASE_CONFIG, "mapa-curriculum");
+}
+
+export const curriculumApp = initCurriculumApp();
+export const curriculumDb = getFirestore(curriculumApp);
 
 const TEACHERS_HUB_CONFIG = {
   apiKey: "AIzaSyC06dLl2Lig3-kD4OVmh4C9LpFW9AeTyOc",

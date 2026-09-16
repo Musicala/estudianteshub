@@ -233,26 +233,6 @@
 
       <a
         class="bottom-nav__item"
-        href="#/route"
-        data-route="route"
-        aria-label="Ver mi ruta de aprendizaje"
-      >
-        <span class="bottom-nav__icon" aria-hidden="true">◇</span>
-        <span class="bottom-nav__text">Mi ruta</span>
-      </a>
-
-      <a
-        class="bottom-nav__item"
-        href="#/routine"
-        data-route="routine"
-        aria-label="Ver mi rutina semanal"
-      >
-        <span class="bottom-nav__icon" aria-hidden="true">⊞</span>
-        <span class="bottom-nav__text">Rutina</span>
-      </a>
-
-      <a
-        class="bottom-nav__item"
         href="#/journal"
         data-route="journal"
         aria-label="Ver mis bitácoras de clase"
@@ -271,11 +251,31 @@
         <span class="bottom-nav__text">Recursos</span>
       </a>
 
+      <a
+        class="bottom-nav__item"
+        href="#/works"
+        data-route="works"
+        aria-label="Ver mis obras"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">♪</span>
+        <span class="bottom-nav__text">Obras</span>
+      </a>
+
+      <a
+        class="bottom-nav__item"
+        href="#/messages"
+        data-route="messages"
+        aria-label="Ver mis mensajes"
+      >
+        <span class="bottom-nav__icon" aria-hidden="true">✉</span>
+        <span class="bottom-nav__text">Mensajes</span>
+      </a>
+
       <button
         id="navMoreBtn"
         class="bottom-nav__item bottom-nav__item--more"
         type="button"
-        data-route-group="works practice messages events timeline profile"
+        data-route-group="route routine practice events timeline profile diagnostics"
         aria-haspopup="dialog"
         aria-controls="navMoreSheet"
         aria-label="Ver más secciones"
@@ -292,11 +292,20 @@
         <div class="more-sheet__handle" aria-hidden="true"></div>
         <div class="more-sheet__title">Más secciones</div>
 
-        <a class="more-sheet__item" href="#/works" data-route="works" data-close-more role="menuitem">
-          <span class="more-sheet__icon" aria-hidden="true">♪</span>
+        <a class="more-sheet__item" href="#/route" data-route="route" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">◇</span>
           <span class="more-sheet__label">
-            <strong>Obras</strong>
-            <span>Revisa las obras de tu proceso musical.</span>
+            <strong>Mi ruta</strong>
+            <span>Consulta tu ruta de aprendizaje.</span>
+          </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+
+        <a class="more-sheet__item" href="#/routine" data-route="routine" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">⊞</span>
+          <span class="more-sheet__label">
+            <strong>Mi rutina</strong>
+            <span>Organiza tu práctica semanal.</span>
           </span>
           <span class="more-sheet__arrow" aria-hidden="true">›</span>
         </a>
@@ -306,15 +315,6 @@
           <span class="more-sheet__label">
             <strong>Diario</strong>
             <span>Registra tu práctica diaria.</span>
-          </span>
-          <span class="more-sheet__arrow" aria-hidden="true">›</span>
-        </a>
-
-        <a class="more-sheet__item" href="#/messages" data-route="messages" data-close-more role="menuitem">
-          <span class="more-sheet__icon" aria-hidden="true">✉</span>
-          <span class="more-sheet__label">
-            <strong>Mensajes</strong>
-            <span>Comunícate con tu docente.</span>
           </span>
           <span class="more-sheet__arrow" aria-hidden="true">›</span>
         </a>
@@ -343,6 +343,12 @@
             <strong>Perfil</strong>
             <span>Tu información general como estudiante.</span>
           </span>
+          <span class="more-sheet__arrow" aria-hidden="true">›</span>
+        </a>
+
+        <a class="more-sheet__item" href="#/diagnostics" data-route="diagnostics" data-close-more role="menuitem">
+          <span class="more-sheet__icon" aria-hidden="true">✓</span>
+          <span class="more-sheet__label"><strong>Diagnósticos iniciales</strong><span>Completa y consulta tus diagnósticos.</span></span>
           <span class="more-sheet__arrow" aria-hidden="true">›</span>
         </a>
       </div>
@@ -450,11 +456,11 @@
     aria-atomic="true"
   ></div>
 
-  <script type="module" src="./src/app.js?v=2026-07-30.5"></script>
+  <script type="module" src="./src/app.js?v=2026-08-31.4-mapa-violin"></script>
 
   <script>
     (() => {
-      const FORCE_REFRESH_VERSION = '2026-07-30.5';
+      const FORCE_REFRESH_VERSION = '2026-08-31.4-mapa-violin';
       const FORCE_REFRESH_KEY = 'estudiantes-hub-force-refresh';
       const canUseServiceWorker =
         'serviceWorker' in navigator &&
