@@ -73,24 +73,30 @@ import {
   PIANO_CURRICULUM_DOCUMENT_ID,
   GUITAR_CURRICULUM_DOCUMENT_ID,
   VIOLIN_CURRICULUM_DOCUMENT_ID,
+  BATERIA_CURRICULUM_DOCUMENT_ID,
   buildPianoLearningRoute,
   buildGuitarLearningRoute,
   buildViolinLearningRoute,
+  buildBateriaLearningRoute,
   getPianoCanonicalStudentId,
   getGuitarCanonicalStudentId,
   getViolinCanonicalStudentId,
+  getBateriaCanonicalStudentId,
   getPianoProgressDocumentId,
   getGuitarProgressDocumentId,
   getViolinProgressDocumentId,
+  getBateriaProgressDocumentId,
   isPianoCurriculumStudent,
   isGuitarCurriculumStudent,
   isViolinCurriculumStudent,
+  isBateriaCurriculumStudent,
   normalizePublishedPianoCurriculum,
   normalizePublishedGuitarCurriculum,
   normalizePublishedViolinCurriculum,
+  normalizePublishedBateriaCurriculum,
 } from "./curriculum.js";
 
-export { isPianoCurriculumStudent, isGuitarCurriculumStudent, isViolinCurriculumStudent } from "./curriculum.js";
+export { isPianoCurriculumStudent, isGuitarCurriculumStudent, isViolinCurriculumStudent, isBateriaCurriculumStudent } from "./curriculum.js";
 
 /* =============================================================================
   Constantes internas
@@ -1591,6 +1597,9 @@ let guitarCurriculumRequest = null;
 let violinCurriculumCache = null;
 let violinCurriculumFetchedAt = 0;
 let violinCurriculumRequest = null;
+let bateriaCurriculumCache = null;
+let bateriaCurriculumFetchedAt = 0;
+let bateriaCurriculumRequest = null;
 
 /*
   Snapshot curricular sanitizado y público. Solo esta lectura sale al proyecto
@@ -1660,6 +1669,13 @@ export async function getPublishedViolinCurriculum(options = {}) {
   })();
   try { return await violinCurriculumRequest; } finally { violinCurriculumRequest = null; }
 }
+export async function getPublishedBateriaCurriculum(options = {}) {
+  const force = options.force === true;
+  if (!force && bateriaCurriculumCache && Date.now() - bateriaCurriculumFetchedAt < PIANO_CURRICULUM_CACHE_MS) return bateriaCurriculumCache;
+  if (!force && bateriaCurriculumRequest) return bateriaCurriculumRequest;
+  bateriaCurriculumRequest = (async () => { const snapshot = await getDoc(doc(curriculumDb, CURRICULUM_COLLECTIONS.published, BATERIA_CURRICULUM_DOCUMENT_ID)); const normalized = snapshot.exists() ? normalizePublishedBateriaCurriculum({ id: snapshot.id, ...snapshot.data() }) : null; bateriaCurriculumCache = normalized; bateriaCurriculumFetchedAt = Date.now(); return normalized; })();
+  try { return await bateriaCurriculumRequest; } finally { bateriaCurriculumRequest = null; }
+}
 
 async function getMapPianoLearningRoute(student = null, options = {}) {
   const curriculum = options.curriculum
@@ -1710,6 +1726,7 @@ async function getMapViolinLearningRoute(student = null, options = {}) {
   const snapshot = await getDoc(doc(db, COLLECTIONS.studentRouteProgress, progressDocumentId));
   return buildViolinLearningRoute({ curriculum, progress: snapshot.exists() ? snapshot.data() : null, canonicalStudentId });
 }
+async function getMapBateriaLearningRoute(student = null, options = {}) { const curriculum = options.curriculum ? normalizePublishedBateriaCurriculum(options.curriculum) : await getPublishedBateriaCurriculum(options); if (!curriculum) return null; const id = getBateriaCanonicalStudentId(student); const docId = getBateriaProgressDocumentId(student); if (!id || !docId) return buildBateriaLearningRoute({ curriculum }); const snapshot = await getDoc(doc(db, COLLECTIONS.studentRouteProgress, docId)); return buildBateriaLearningRoute({ curriculum, progress: snapshot.exists() ? snapshot.data() : null, canonicalStudentId: id }); }
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -2016,6 +2033,7 @@ export async function getStudentLearningRoute(student = null, options = {}) {
     }
     if (isGuitarCurriculumStudent(student, options)) return await getMapGuitarLearningRoute(student, options);
     if (isViolinCurriculumStudent(student, options)) return await getMapViolinLearningRoute(student, options);
+    if (isBateriaCurriculumStudent(student, options)) return await getMapBateriaLearningRoute(student, options);
 
     const studentId = getStudentIdentity(student);
     if (!studentId) return null;
@@ -3217,7 +3235,7 @@ export async function getStudentPortalHome(studentId, options = {}) {
 
     const queryStudentId = getStudentIdentity(student) || id;
     const fallbackStudentId = getStudentFallbackId(student);
-    const usesMapCurriculum = isPianoCurriculumStudent(student) || isGuitarCurriculumStudent(student) || isViolinCurriculumStudent(student);
+    const usesMapCurriculum = isPianoCurriculumStudent(student) || isGuitarCurriculumStudent(student) || isViolinCurriculumStudent(student) || isBateriaCurriculumStudent(student);
     const routeRequest = usesMapCurriculum
       ? getStudentLearningRoute(student).catch(() => null)
       : getBestStudentRoute(queryStudentId, { student }).catch(() => null);
@@ -3276,7 +3294,7 @@ export async function getFullStudentPortalBundle(studentId) {
       };
     }
 
-    const usesMapCurriculum = isPianoCurriculumStudent(student) || isGuitarCurriculumStudent(student) || isViolinCurriculumStudent(student);
+    const usesMapCurriculum = isPianoCurriculumStudent(student) || isGuitarCurriculumStudent(student) || isViolinCurriculumStudent(student) || isBateriaCurriculumStudent(student);
     const routeRequest = usesMapCurriculum
       ? getStudentLearningRoute(student).catch(() => null)
       : getBestStudentRoute(id, { student }).catch(() => null);

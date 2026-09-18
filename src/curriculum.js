@@ -16,6 +16,9 @@ export const GUITAR_PROGRESS_EPOCH = "mapa-guitarra-20260831-v1";
 export const VIOLIN_CURRICULUM_DOCUMENT_ID = "violin";
 export const VIOLIN_ROUTE_TEMPLATE_ID = "mapa-violin";
 export const VIOLIN_PROGRESS_EPOCH = "mapa-violin-20260831-v1";
+export const BATERIA_CURRICULUM_DOCUMENT_ID = "bateria";
+export const BATERIA_ROUTE_TEMPLATE_ID = "mapa-bateria";
+export const BATERIA_PROGRESS_EPOCH = "mapa-bateria-20260918-v1";
 
 const COMPONENT_LABELS = Object.freeze({
   corporal: "Corporal",
@@ -195,6 +198,7 @@ function isGuitarTerm(value = "") {
 function isViolinTerm(value = "") {
   return /(^|\s)(violin|violinista)(\s|$)/.test(normalizeText(value));
 }
+function isBateriaTerm(value = "") { return /(^|\s)(bateria|baterista|percusion)(\s|$)/.test(normalizeText(value)); }
 
 function processState(process = {}) {
   return normalizeText(
@@ -279,6 +283,7 @@ export function isGuitarCurriculumStudent(student = null, options = {}) {
 export function isViolinCurriculumStudent(student = null, options = {}) {
   return isInstrumentCurriculumStudent(student, options, isViolinTerm);
 }
+export function isBateriaCurriculumStudent(student = null, options = {}) { return isInstrumentCurriculumStudent(student, options, isBateriaTerm); }
 
 function isInstrumentCurriculumStudent(student = null, options = {}, matchesInstrument = () => false) {
   if (!student || typeof student !== "object") return false;
@@ -314,6 +319,7 @@ export function getPianoCanonicalStudentId(student = null) {
 
 export function getGuitarCanonicalStudentId(student = null) { return getMapCanonicalStudentId(student); }
 export function getViolinCanonicalStudentId(student = null) { return getMapCanonicalStudentId(student); }
+export function getBateriaCanonicalStudentId(student = null) { return getMapCanonicalStudentId(student); }
 
 function getMapCanonicalStudentId(student = null) {
   if (!student || typeof student !== "object") return "";
@@ -351,6 +357,7 @@ export function getViolinProgressDocumentId(student = null) {
   const canonicalStudentId = getViolinCanonicalStudentId(student);
   return canonicalStudentId ? `${canonicalStudentId}__${VIOLIN_ROUTE_TEMPLATE_ID}` : "";
 }
+export function getBateriaProgressDocumentId(student = null) { const id = getBateriaCanonicalStudentId(student); return id ? `${id}__${BATERIA_ROUTE_TEMPLATE_ID}` : ""; }
 
 function normalizePublishedSkill(rawSkill = {}, experience, index = 0) {
   const source = rawSkill?.skill && typeof rawSkill.skill === "object"
@@ -510,6 +517,10 @@ export function normalizePublishedViolinCurriculum(raw = null) {
     source: raw?.source && typeof raw.source === "object" ? raw.source : {},
   } : null;
 }
+export function normalizePublishedBateriaCurriculum(raw = null) {
+  const normalized = normalizePublishedPianoCurriculum({ ...raw, routeKey: "piano", source: { ...(raw?.source || {}), slug: "piano" } });
+  return normalized ? { ...normalized, isPublishedPianoCurriculum: false, isPublishedGuitarCurriculum: false, isPublishedViolinCurriculum: false, isPublishedBateriaCurriculum: true, routeTemplateId: BATERIA_ROUTE_TEMPLATE_ID, progressEpoch: BATERIA_PROGRESS_EPOCH, routeName: safeText(raw?.route?.name, "Batería"), source: raw?.source && typeof raw.source === "object" ? raw.source : {} } : null;
+}
 
 export function isValidPianoProgress(progress = null, canonicalStudentId = "") {
   if (!progress || typeof progress !== "object") return false;
@@ -536,6 +547,7 @@ export function isValidViolinProgress(progress = null, canonicalStudentId = "") 
     safeText(progress.routeTemplateId) === VIOLIN_ROUTE_TEMPLATE_ID &&
     safeText(progress.progressEpoch) === VIOLIN_PROGRESS_EPOCH;
 }
+export function isValidBateriaProgress(progress = null, canonicalStudentId = "") { return Boolean(progress) && safeText(progress.studentId) === safeText(canonicalStudentId) && safeText(progress.studentKey) === safeText(canonicalStudentId) && safeText(progress.routeTemplateId) === BATERIA_ROUTE_TEMPLATE_ID && safeText(progress.progressEpoch) === BATERIA_PROGRESS_EPOCH; }
 
 function normalizeHistory(progress, validGoalIds) {
   return safeArray(progress?.history)
@@ -710,4 +722,9 @@ export function buildViolinLearningRoute({ curriculum, progress = null, canonica
     canonicalStudentId,
   });
   return route ? { ...route, id: route.studentId ? `${route.studentId}__${VIOLIN_ROUTE_TEMPLATE_ID}` : "", artKey: "violin", routeTemplateId: VIOLIN_ROUTE_TEMPLATE_ID, progressEpoch: VIOLIN_PROGRESS_EPOCH, title: normalized.routeName, routeName: normalized.routeName, processLabel: "Violín", source: normalized.source, templateRevision: normalized.revision } : null;
+}
+export function buildBateriaLearningRoute({ curriculum, progress = null, canonicalStudentId = "" } = {}) {
+  const normalized = curriculum?.isPublishedBateriaCurriculum ? curriculum : normalizePublishedBateriaCurriculum(curriculum); if (!normalized) return null;
+  const route = buildPianoLearningRoute({ curriculum: { ...normalized, isPublishedPianoCurriculum: true, routeTemplateId: PIANO_ROUTE_TEMPLATE_ID, progressEpoch: PIANO_PROGRESS_EPOCH }, progress: isValidBateriaProgress(progress, canonicalStudentId) ? { ...progress, routeTemplateId: PIANO_ROUTE_TEMPLATE_ID, progressEpoch: PIANO_PROGRESS_EPOCH } : null, canonicalStudentId });
+  return route ? { ...route, id: route.studentId ? `${route.studentId}__${BATERIA_ROUTE_TEMPLATE_ID}` : "", artKey: "bateria", routeTemplateId: BATERIA_ROUTE_TEMPLATE_ID, progressEpoch: BATERIA_PROGRESS_EPOCH, title: normalized.routeName, routeName: normalized.routeName, processLabel: "Batería", source: normalized.source, templateRevision: normalized.revision } : null;
 }

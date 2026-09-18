@@ -581,7 +581,7 @@ async function renderHome(deps) {
 
   const student = normalized.student || ctx.student;
   const usesPianoCurriculum = Boolean(
-    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student)
+    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)
   );
   const legacyRoute = normalized.route || (
     usesPianoCurriculum ? null : buildDefaultStudentRoute(student)
@@ -1029,7 +1029,7 @@ async function renderRouteView(deps) {
   const studentId = getStudentId(ctx);
   const student = getStudent(ctx);
   const usesPianoCurriculum = Boolean(
-    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student)
+    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)
   );
 
   let routes = [];
@@ -2972,7 +2972,7 @@ async function renderRoutine(deps) {
   let resources = [];
   try {
     if (
-      (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student)) &&
+      (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)) &&
       typeof api.getStudentLearningRoute === "function"
     ) {
       const route = await api.getStudentLearningRoute(student);
@@ -3739,7 +3739,7 @@ async function renderTimeline(deps) {
   const studentId = getStudentId(ctx);
   const student   = getStudent(ctx);
   const usesPianoCurriculum = Boolean(
-    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student)
+    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)
   );
 
   let bitacoras = [], allRoutes = [], events = [];
@@ -3925,7 +3925,7 @@ function wireReportView(deps, student, studentId) {
         })(),
         (async () => {
           if (
-            (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student)) &&
+            (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)) &&
             typeof api.getStudentLearningRoute === "function"
           ) {
             route = await api.getStudentLearningRoute(student).catch(() => null);

@@ -18,7 +18,7 @@ import {
   humanAuthError,
 } from "./auth.js";
 
-import * as api from "./data.js?v=2026-08-31.4-mapa-violin";
+import * as api from "./data.js?v=2026-09-18.1-mapa-bateria";
 
 import { renderRoute } from "./views.js";
 

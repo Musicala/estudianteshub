@@ -5,12 +5,15 @@ import {
   PIANO_PROGRESS_EPOCH,
   PIANO_ROUTE_TEMPLATE_ID,
   buildPianoLearningRoute,
+  buildBateriaLearningRoute,
   buildViolinLearningRoute,
   getPianoCanonicalStudentId,
   getPianoProgressDocumentId,
   isPianoCurriculumStudent,
+  isBateriaCurriculumStudent,
   isViolinCurriculumStudent,
   normalizePublishedPianoCurriculum,
+  normalizePublishedBateriaCurriculum,
   normalizePublishedViolinCurriculum,
 } from "../src/curriculum.js";
 
@@ -123,6 +126,20 @@ test("detecta y construye Violín desde un currículo publicado flexible", () =>
   assert.ok(curriculum);
   assert.equal(curriculum.experienceCount, 2);
   assert.equal(buildViolinLearningRoute({ curriculum }).experiences.length, 2);
+});
+
+test("detecta y construye Batería desde un currículo publicado flexible", () => {
+  const bateria = {
+    ...structuredClone(RAW_CURRICULUM),
+    routeKey: "bateria",
+    source: { ...RAW_CURRICULUM.source, slug: "bateria" },
+    route: { ...RAW_CURRICULUM.route, name: "Batería" },
+  };
+  assert.equal(isBateriaCurriculumStudent({ instrumento: "Batería" }), true);
+  const curriculum = normalizePublishedBateriaCurriculum(bateria);
+  assert.ok(curriculum);
+  assert.equal(curriculum.experienceCount, 2);
+  assert.equal(buildBateriaLearningRoute({ curriculum }).experiences.length, 2);
 });
 
 test("solo acepta un canonicalStudentId explícito, no stu_ ni identidad pendiente", () => {
