@@ -14,7 +14,7 @@ const APP_NAME = "estudiantes-hub-musicala";
   Eso obliga al Service Worker a reinstalarse, limpiar el caché viejo y
   recargar a los estudiantes a la última versión (también en iPhone).
 */
-const CACHE_VERSION = "v2.3.3-login-principal-2026-10-03.1";
+const CACHE_VERSION = "v2.3.4-login-curriculum-2026-10-03.2";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;
@@ -38,6 +38,7 @@ const APP_SHELL = [
   "./src/auth.js",
   "./src/permissions.js",
   "./src/data.js",
+  "./src/curriculum.js",
   "./src/normalizers.js",
   "./src/ui.js",
   "./src/views.js",

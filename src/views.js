@@ -580,7 +580,17 @@ async function renderHome(deps) {
   });
 
   const student = normalized.student || ctx.student;
-  const route = normalized.route || buildDefaultStudentRoute(student);
+  const usesMapCurriculum = Boolean(
+    api.isPianoCurriculumStudent?.(student) ||
+    api.isGuitarCurriculumStudent?.(student) ||
+    api.isViolinCurriculumStudent?.(student) ||
+    api.isBateriaCurriculumStudent?.(student)
+  );
+  const curriculumName = humanLabel(
+    safeArray(student?.processes).find((process) => process.active !== false)?.detalle || student?.instrumento || student?.area,
+    "ruta"
+  );
+  const legacyRoute = normalized.route || (usesMapCurriculum ? null : buildDefaultStudentRoute(student));
   const bitacoras = normalized.bitacoras || [];
   const resources = normalized.resources || [];
   const events = normalized.events || [];
@@ -589,11 +599,15 @@ async function renderHome(deps) {
   const nextEvent = events[0] || null;
 
   // Ruta de aprendizaje real (route_templates + student_route_progress).
-  let learning = null;
-  if (typeof api.getStudentLearningRoute === "function") {
+  let learning = legacyRoute?.isMapCurriculum ? legacyRoute : null;
+  if (!learning && typeof api.getStudentLearningRoute === "function") {
     learning = await api.getStudentLearningRoute(student).catch(() => null);
   }
   const hasLearning = Boolean(learning && learning.totalGoals > 0);
+  const route = hasLearning ? learning : usesMapCurriculum ? null : legacyRoute;
+  const completedLearningGoals = hasLearning
+    ? safeArray(learning.goals).filter((goal) => isDoneStatus(getGoalStatus(goal))).length
+    : 0;
 
   const progress = hasLearning ? learning.progress : routeProgress(route);
 
@@ -625,11 +639,13 @@ async function renderHome(deps) {
     title: "Ruta de aprendizaje",
     subtitle: hasLearning
       ? (learning.stage
-          ? `${learning.stage} · ${learning.completedGoals}/${learning.totalGoals} objetivos logrados`
+          ? `${learning.stage} · ${completedLearningGoals}/${learning.totalGoals} objetivos logrados`
           : "Tu proceso actual en Musicala.")
       : route
         ? route.description || route.descripcion || "Tu proceso actual en Musicala."
-        : "Todavía no hay una ruta configurada.",
+        : usesMapCurriculum
+          ? `La ruta publicada de ${curriculumName} no está disponible en este momento.`
+          : "Todavía no hay una ruta configurada.",
     bodyHTML: hasLearning
       ? `
         <div class="route-summary">
@@ -655,9 +671,13 @@ async function renderHome(deps) {
           ${routeProgressCircle(progress)}
         </div>
       `
-      : emptyState("Ruta pendiente", "Cuando el equipo configure tu ruta, aparecerá aquí.", {
-          icon: "◇",
-        }),
+      : emptyState(
+          usesMapCurriculum ? "Ruta publicada no disponible" : "Ruta pendiente",
+          usesMapCurriculum
+            ? "No mostramos una ruta anterior como reemplazo. Intenta de nuevo en unos minutos."
+            : "Cuando el equipo configure tu ruta, aparecerá aquí.",
+          { icon: "◇" }
+        ),
     footerHTML: button("Abrir ruta", {
       variant: "ghost",
       route: "route",
@@ -742,8 +762,10 @@ async function renderHome(deps) {
   // Badges
   const badgeData = {
     bitacoras:        bitacoras.length,
-    hasRoute:         Boolean(route && (route.title || route.titulo)),
-    completedGoals:   asArray(route?.goals || route?.objetivos || []).filter((g) => isDoneStatus(getGoalStatus(g))).length,
+    hasRoute:         Boolean(route && (route.title || route.titulo || route.routeName)),
+    completedGoals:   hasLearning
+      ? completedLearningGoals
+      : asArray(route?.goals || route?.objetivos || []).filter((g) => isDoneStatus(getGoalStatus(g))).length,
     progress,
     practiceSessions: 0,
     streak:           0,
@@ -1010,12 +1032,23 @@ async function renderRouteView(deps) {
   const ctx = getCtx(deps);
   const api = getApi(deps);
   const studentId = getStudentId(ctx);
+  const student = getStudent(ctx);
+  const usesMapCurriculum = Boolean(
+    api.isPianoCurriculumStudent?.(student) ||
+    api.isGuitarCurriculumStudent?.(student) ||
+    api.isViolinCurriculumStudent?.(student) ||
+    api.isBateriaCurriculumStudent?.(student)
+  );
+  const curriculumName = humanLabel(
+    safeArray(student?.processes).find((process) => process.active !== false)?.detalle || student?.instrumento || student?.area,
+    "aprendizaje"
+  );
 
   let routes = [];
 
-  if (typeof api.getStudentRoutes === "function") {
+  if (!usesMapCurriculum && typeof api.getStudentRoutes === "function") {
     routes = await api.getStudentRoutes(studentId).catch(() => []);
-  } else if (typeof api.getStudentRoute === "function") {
+  } else if (!usesMapCurriculum && typeof api.getStudentRoute === "function") {
     const route = await api.getStudentRoute(studentId).catch(() => null);
     routes = route ? [route] : [];
   }
@@ -1026,11 +1059,24 @@ async function renderRouteView(deps) {
   // tal como la define el equipo en "Bitácoras de Clase".
   let learning = null;
   if (typeof api.getStudentLearningRoute === "function") {
-    learning = await api.getStudentLearningRoute(getStudent(ctx)).catch(() => null);
+    learning = await api.getStudentLearningRoute(student).catch(() => null);
   }
 
   if (learning && learning.totalGoals > 0) {
     return renderLearningRoute(ctx, learning, studentId);
+  }
+
+  if (usesMapCurriculum) {
+    return `
+      ${viewHeader("Mi ruta", studentSubtitle(ctx), {
+        eyebrow: "Ruta de aprendizaje",
+      })}
+      ${emptyState(
+        `Ruta de ${curriculumName} no disponible`,
+        "No pudimos cargar el currículo publicado. No mostraremos una ruta anterior como reemplazo; intenta de nuevo en unos minutos.",
+        { icon: "◇" }
+      )}
+    `;
   }
 
   let mainRoute = routes[0] || null;
@@ -1210,13 +1256,15 @@ const LEARNING_BLOCK_ICONS = {
   teorico: "◈",
   obras: "♪",
   repertorio: "♫",
+  creativo: "✦",
   general: "○",
 };
 
 function learningGoalRow(goal, studentId) {
   const icon = goal.done ? "✓" : goal.active ? "◉" : "○";
   const tone = goal.done ? "success" : goal.active ? "pink" : "ghost";
-  const evalVal = loadAutoEval(studentId, goal.title);
+  const autoEvalKey = goal.id || goal.title;
+  const evalVal = loadAutoEval(studentId, autoEvalKey);
 
   return `
     ${itemRow({
@@ -1228,13 +1276,18 @@ function learningGoalRow(goal, studentId) {
     })}
     <div class="autoeval" style="padding:4px 12px 12px 44px;">
       <span class="autoeval__label">Mi autoevaluación:</span>
-      ${renderStarRating(studentId, goal.title, evalVal)}
+      ${renderStarRating(studentId, autoEvalKey, evalVal)}
     </div>
   `;
 }
 
 function renderLearningRoute(ctx, learning, studentId) {
   const heading = humanLabel(learning.processLabel, "") || humanLabel(learning.routeName, "Ruta de aprendizaje");
+  const currentExperience =
+    learning.currentExperience ||
+    safeArray(learning.experiences).find((experience) => experience.isCurrent) ||
+    safeArray(learning.experiences)[0] ||
+    null;
 
   const summary = card({
     title: heading,
@@ -1268,6 +1321,36 @@ function renderLearningRoute(ctx, learning, studentId) {
       })).join("")}</div>`
     : emptyState("Sin objetivos registrados", "Aún no hay objetivos específicos en esta ruta.", { icon: "○" });
 
+  const currentExperienceHTML = currentExperience
+    ? card({
+        title: `Ahora: ${currentExperience.label}${currentExperience.name ? ` · ${currentExperience.name}` : ""}`,
+        subtitle: "Esta es la experiencia actual según lo marcado por tu docente.",
+        bodyHTML: `
+          <div class="stack">
+            <div class="read">
+              <h4>Objetivo de la experiencia</h4>
+              <p>${htmlText(currentExperience.objective || currentExperience.description || "Avanzar en los objetivos propuestos para esta experiencia.")}</p>
+              ${currentExperience.evidence ? `<h4>Evidencia esperada</h4><p>${htmlText(currentExperience.evidence)}</p>` : ""}
+              ${currentExperience.personalRepertoire?.focus ? `
+                <h4>${htmlText(currentExperience.personalRepertoire.title || "Repertorio personal")}</h4>
+                <p>${htmlText(currentExperience.personalRepertoire.focus)}</p>
+                ${currentExperience.personalRepertoire.evidence ? `<p><strong>Evidencia:</strong> ${htmlText(currentExperience.personalRepertoire.evidence)}</p>` : ""}
+              ` : ""}
+            </div>
+            ${currentExperience.goals?.length
+              ? `<div class="list">${currentExperience.goals.map((goal) => itemRow({
+                  title: goal.title,
+                  meta: goal.achievement || goal.description || "Objetivo actual",
+                  icon: goal.done ? "✓" : "◉",
+                  className: goal.active ? "item--next" : "",
+                  actionHTML: chip(goal.status || "En foco", goal.done ? "success" : "pink"),
+                })).join("")}</div>`
+              : `<p class="note">Esta experiencia aún no tiene saberes publicados.</p>`}
+          </div>
+        `,
+      })
+    : "";
+
   // Resumen por experiencia.
   const experiencesHTML = learning.experiences.length
     ? card({
@@ -1291,6 +1374,8 @@ function renderLearningRoute(ctx, learning, studentId) {
       ${summary}
 
       ${progressBar(learning.progress, { label: "Avance general" })}
+
+      ${currentExperienceHTML}
 
       ${blocksHTML}
 
@@ -2753,7 +2838,11 @@ function buildWeeklyRoutine(goals = [], settings = {}) {
       isActive: true,
       totalMinutes: minPerDay,
       tasks: dayGoals.map((g) => ({
+        id:      uiSafeText(g?.id) || `${getGoalTitle(g)}-${dayIndex}`,
         title:   getGoalTitle(g),
+        description: getGoalDescription(g),
+        component: uiSafeText(g?.componentLabel || g?.component || g?.area),
+        tags: safeArray(g?.tags || g?.etiquetas).map((tag) => uiSafeText(tag)).filter(Boolean),
         minutes: minPerGoal,
         status:  getGoalStatus(g),
       })),
@@ -2784,10 +2873,11 @@ function renderWeekGrid(weekDays = []) {
 
     const tasksHTML = day.tasks.length
       ? day.tasks.map((t) => `
-          <div class="routine-task">
+          <button class="routine-task" type="button" data-routine-task="${escapeAttr(t.id)}" aria-label="Abrir ejercicio: ${escapeAttr(t.title)}">
             <div class="routine-task__title">${htmlText(t.title)}</div>
             <div class="routine-task__mins">${escapeHtml(formatMinutes(t.minutes))}</div>
-          </div>
+            <span class="routine-task__open">Ver ejercicio →</span>
+          </button>
         `).join("")
       : `<p class="note" style="font-size:0.7rem;">Configura objetivos en tu ruta.</p>`;
 
@@ -2805,6 +2895,50 @@ function renderWeekGrid(weekDays = []) {
   return `<div class="routine-week">${cols}</div>`;
 }
 
+function routineSearchText(goal = {}) {
+  return normalizeSearchText(joinClean([
+    getGoalTitle(goal), getGoalDescription(goal), goal.componentLabel, goal.component,
+    goal.category, safeArray(goal.tags || goal.etiquetas).join(" "),
+  ], " "));
+}
+
+function routineResourceMatches(goal = {}, resources = []) {
+  const terms = routineSearchText(goal).split(/\s+/).filter((term) => term.length >= 4);
+  if (!terms.length) return [];
+  return resources.map((resource) => {
+    const haystack = normalizeSearchText(joinClean([
+      resource.title, resource.titulo, resource.description, resource.descripcion,
+      resource.tema, resource.area, resource.instrument, resource.instrumento,
+      safeArray(resource.tags || resource.etiquetas).join(" "),
+    ], " "));
+    return { resource, score: terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0) };
+  }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score).slice(0, 4).map(({ resource }) => resource);
+}
+
+function routineExerciseModal(task = {}, resources = []) {
+  const description = uiSafeText(task.description, "Tu docente definió este objetivo para tu proceso. Practícalo con calma y registra tus dudas.");
+  const materialLinks = routineResourceMatches(task, resources).flatMap((resource) => bibResourceLinks(resource).map((link) => ({
+    ...link, resourceTitle: uiSafeText(resource.title || resource.titulo, "Material de apoyo"),
+  }))).slice(0, 5);
+  const librarySearch = encodeURIComponent(task.title);
+  openModal({
+    title: task.title,
+    subtitle: `${task.component ? `${task.component} · ` : ""}${formatMinutes(task.minutes)} programados`,
+    size: "wide",
+    bodyHTML: `<div class="routine-exercise-detail">
+      <section class="routine-exercise-detail__focus"><span class="routine-exercise-detail__eyebrow">Qué vas a trabajar</span><p>${htmlText(description)}</p></section>
+      ${task.tags?.length ? `<div class="biblioTags">${task.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+      <section class="routine-exercise-detail__materials"><h4>Material para practicar</h4>
+        ${materialLinks.length ? `<div class="routine-material-list">${materialLinks.map((link) => {
+          const kind = bibLinkKind(link.url, link.title);
+          return `<a class="biblioLinkBtn" href="${escapeAttr(link.url)}" target="_blank" rel="noopener noreferrer"><span class="biblioLinkIcon" aria-hidden="true">${kind.icon}</span><span class="biblioLinkInfo"><span class="biblioLinkKind">${escapeHtml(link.resourceTitle)}</span><span class="biblioLinkName">${escapeHtml(link.title || "Abrir material")}</span></span><span class="biblioLinkOpen">Abrir ↗</span></a>`;
+        }).join("")}</div>` : `<p class="note">Aún no hay material enlazado directamente. Busca este ejercicio en la biblioteca de Recursos o pregúntale a MusiProfe.</p>`}
+      </section>
+    </div>`,
+    footHTML: `<a class="btn btn--ghost" href="#/resources?search=${librarySearch}">Buscar en Recursos →</a><button class="btn btn--primary" type="button" data-action="open-musiprofe">Preguntar a MusiProfe</button>`,
+  });
+}
+
 async function renderRoutine(deps) {
   const ctx       = getCtx(deps);
   const api       = getApi(deps);
@@ -2813,8 +2947,15 @@ async function renderRoutine(deps) {
 
   // Cargar objetivos desde Firebase
   let goals = [];
+  let resources = [];
   try {
-    if (typeof api.getBestStudentRoute === "function") {
+    if (
+      (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)) &&
+      typeof api.getStudentLearningRoute === "function"
+    ) {
+      const route = await api.getStudentLearningRoute(student);
+      goals = safeArray(route?.goals).filter((goal) => goal.active === true);
+    } else if (typeof api.getBestStudentRoute === "function") {
       const route = await api.getBestStudentRoute(studentId);
       goals = safeArray(route?.goals || route?.objetivos || []);
     } else if (typeof api.getStudentRoutes === "function") {
@@ -2824,6 +2965,10 @@ async function renderRoutine(deps) {
     }
   } catch {
     goals = [];
+  }
+
+  if (typeof api.listResources === "function") {
+    resources = await api.listResources({ student }).catch(() => []);
   }
 
   const savedSettings  = loadRoutineSettings(studentId);
@@ -2914,9 +3059,21 @@ async function renderRoutine(deps) {
 
       ${hasRoutine ? `
         ${card({
-          title: "Tu semana de estudio",
-          subtitle: `${activeDayCount} día${activeDayCount !== 1 ? "s" : ""} activo${activeDayCount !== 1 ? "s" : ""} · ${formatMinutes(minPerDay)} por día · ${formatMinutes(totalMinutes)} en total`,
+          title: "Tu plan de práctica",
+          subtitle: `Elige un ejercicio para ver qué trabajar y abrir el material. ${activeDayCount} día${activeDayCount !== 1 ? "s" : ""} activo${activeDayCount !== 1 ? "s" : ""} · ${formatMinutes(minPerDay)} por día.`,
           bodyHTML: renderWeekGrid(weekDays),
+        })}
+
+        ${card({
+          title: "Busca un ejercicio",
+          subtitle: "Encuentra rápidamente cualquier objetivo de tu ruta.",
+          bodyHTML: `
+            <div class="routine-search" role="search">
+              <label class="routine-search__field" for="routineSearchInput"><span aria-hidden="true">⌕</span><input id="routineSearchInput" type="search" placeholder="Ej.: lectura, escalas, ritmo…" autocomplete="off" enterkeyhint="search" aria-label="Buscar ejercicio en mi rutina" /></label>
+              <p class="routine-search__meta" id="routineSearchMeta">${goals.length} ejercicio${goals.length !== 1 ? "s" : ""} en tu ruta</p>
+              <div class="routine-search__results" id="routineSearchResults"></div>
+            </div>
+          `,
         })}
 
         ${card({
@@ -3014,6 +3171,38 @@ async function renderRoutine(deps) {
         } catch { /* noop */ }
         deps.actions?.reload?.();
       });
+
+      const taskIndex = new Map(weekDays.flatMap((day) => day.tasks).map((task) => [task.id, task]));
+      viewRoot()?.querySelectorAll("[data-routine-task]").forEach((buttonEl) => {
+        buttonEl.addEventListener("click", () => {
+          const task = taskIndex.get(buttonEl.getAttribute("data-routine-task"));
+          if (task) routineExerciseModal(task, resources);
+        });
+      });
+
+      const searchInput = document.getElementById("routineSearchInput");
+      const searchResults = document.getElementById("routineSearchResults");
+      const searchMeta = document.getElementById("routineSearchMeta");
+      const searchGoals = goals.map((goal, index) => ({
+        id: uiSafeText(goal?.id) || `routine-goal-${index}`,
+        title: getGoalTitle(goal, index), description: getGoalDescription(goal),
+        component: uiSafeText(goal?.componentLabel || goal?.component || goal?.area),
+        tags: safeArray(goal?.tags || goal?.etiquetas).map((tag) => uiSafeText(tag)).filter(Boolean),
+      }));
+      const paintSearch = () => {
+        if (!searchResults || !searchMeta) return;
+        const query = normalizeSearchText(searchInput?.value);
+        const matches = query ? searchGoals.filter((goal) => routineSearchText(goal).includes(query)) : [];
+        searchMeta.textContent = query ? `${matches.length} resultado${matches.length !== 1 ? "s" : ""}` : `${searchGoals.length} ejercicio${searchGoals.length !== 1 ? "s" : ""} en tu ruta`;
+        searchResults.innerHTML = matches.map((goal) => `<button class="routine-search-result" type="button" data-routine-search-goal="${escapeAttr(goal.id)}"><span><strong>${htmlText(goal.title)}</strong>${goal.component ? `<small>${escapeHtml(goal.component)}</small>` : ""}</span><span aria-hidden="true">Ver →</span></button>`).join("") || (query ? `<p class="note">No encontramos ese ejercicio. Prueba con otra palabra o revisa tu ruta.</p>` : "");
+        searchResults.querySelectorAll("[data-routine-search-goal]").forEach((buttonEl) => {
+          buttonEl.addEventListener("click", () => {
+            const goal = searchGoals.find((item) => item.id === buttonEl.getAttribute("data-routine-search-goal"));
+            if (goal) routineExerciseModal({ ...goal, minutes: minPerDay }, resources);
+          });
+        });
+      };
+      searchInput?.addEventListener("input", paintSearch);
     },
   };
 }
@@ -3526,6 +3715,10 @@ async function renderTimeline(deps) {
   const ctx       = getCtx(deps);
   const api       = getApi(deps);
   const studentId = getStudentId(ctx);
+  const student   = getStudent(ctx);
+  const usesMapCurriculum = Boolean(
+    api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)
+  );
 
   let bitacoras = [], allRoutes = [], events = [];
 
@@ -3539,7 +3732,10 @@ async function renderTimeline(deps) {
       }
     })(),
     (async () => {
-      if (typeof api.getStudentRoutes === "function") {
+      if (usesMapCurriculum && typeof api.getStudentLearningRoute === "function") {
+        const learning = await api.getStudentLearningRoute(student).catch(() => null);
+        allRoutes = learning ? [learning] : [];
+      } else if (typeof api.getStudentRoutes === "function") {
         allRoutes = await api.getStudentRoutes(studentId).catch(() => []);
       } else if (typeof api.getStudentRoute === "function") {
         const r = await api.getStudentRoute(studentId).catch(() => null);
@@ -3689,7 +3885,12 @@ function wireReportView(deps, student, studentId) {
           }
         })(),
         (async () => {
-          if (typeof api.getStudentRoutes === "function") {
+          if (
+            (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)) &&
+            typeof api.getStudentLearningRoute === "function"
+          ) {
+            route = await api.getStudentLearningRoute(student).catch(() => null);
+          } else if (typeof api.getStudentRoutes === "function") {
             const routes = await api.getStudentRoutes(studentId).catch(() => []);
             route = safeArray(routes)[0] || null;
           }
@@ -3874,6 +4075,9 @@ async function renderWorks(deps) {
   }) };
 }
 
+/* =============================================================================
+  Diagnósticos iniciales
+============================================================================= */
 const DIAGNOSTIC_FORMS = Object.freeze({
   theory: { title: "Diagnóstico teórico", subtitle: "Lectura musical, ritmo y conocimientos teóricos básicos.", questions: [["notes", "Identifica las notas según su ubicación.", "Ej. do, re, mi..."], ["figures", "¿Qué figuras musicales reconoces y cuál es su duración?", "Escribe las que reconoces y su duración"], ["rhythmEvidence", "Enlace a tu audio/video intentando el ritmo del ejercicio.", "Drive o YouTube"], ["meter", "Define qué es un compás en música y para qué sirve.", "Escribe tu respuesta", "textarea"], ["gMajor", "Nombra las notas de la escala diatónica de Sol mayor en orden.", "Ej. sol, la, si..."]] },
   practice: { title: "Diagnóstico práctico · Piano", subtitle: "Conoceremos tu experiencia, instrumento y punto de partida en el piano.", questions: [["goals", "¿Por qué quieres aprender piano y cuáles son tus metas personales?", "Cuéntanos tus motivos y metas", "textarea"], ["hasKeyboard", "¿Tienes piano o teclado disponible en casa para practicar?", "Sí / No / A veces"], ["instrumentPhoto", "Enlace a una foto de tu piano o teclado.", "Drive"], ["bodyPosture", "¿Cuál postura corporal consideras correcta para tocar piano?", "Describe tu respuesta"], ["handPosture", "¿Cuál postura de manos consideras correcta para tocar piano?", "Describe tu respuesta"], ["patternEvidence", "Enlace a un video tocando un patrón repetitivo de dos o más notas.", "Drive o YouTube"], ["songExperience", "¿Has tocado una canción completa y aún puedes tocarla?", "Sí / No; cuéntanos cuál"], ["songEvidence", "Si aplica, enlace a un video de una canción que hayas tocado.", "Opcional: Drive o YouTube", "optional"], ["whiteBlackKeys", "¿Qué sabes sobre las teclas blancas y negras del piano?", "Escribe tu respuesta", "textarea"]] },

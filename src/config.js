@@ -44,7 +44,7 @@ export const APP_META = Object.freeze({
   shortName: "Estudiantes HUB",
   institution: "Musicala",
   version: "1.0.1",
-  build: "2026-07-13.3-correccion-correos-vinculados",
+  build: "2026-10-03.2-login-curriculum",
   lang: "es-CO",
   defaultRoute: "home",
 });
@@ -93,6 +93,20 @@ export const LIBRARY_FIREBASE_CONFIG = Object.freeze({
 
 export const LIBRARY_COLLECTIONS = Object.freeze({
   resources: "recursos",
+});
+
+/* Currículo público publicado desde Mapa de Experiencias. */
+export const CURRICULUM_FIREBASE_CONFIG = Object.freeze({
+  apiKey: "AIzaSyACJ_tXf8znOlNC2bT3OlxTlpm-i2FkOl8",
+  authDomain: "mapa-de-experiencias.firebaseapp.com",
+  projectId: "mapa-de-experiencias",
+  storageBucket: "mapa-de-experiencias.firebasestorage.app",
+  messagingSenderId: "131491272175",
+  appId: "1:131491272175:web:4b4a3d1efa8b3b0695121a",
+});
+
+export const CURRICULUM_COLLECTIONS = Object.freeze({
+  published: "published_curricula",
 });
 
 export const FIREBASE_OPTIONS = Object.freeze({
