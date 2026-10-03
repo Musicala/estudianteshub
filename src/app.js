@@ -14,6 +14,8 @@
 import {
   initAuth,
   loginGoogle,
+  loginWithEmail,
+  resetEmailPassword,
   logout,
   humanAuthError,
 } from "./auth.js";
@@ -1174,6 +1176,7 @@ function wireMoreSheet() {
     }
   });
 
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeMoreSheet();
   });
@@ -1258,16 +1261,21 @@ function renderLoggedOut() {
         y eventos de Musicala en un solo lugar.
       </p>
 
-      <div class="hero-card__actions">
+      <div class="hero-card__actions stack stack--sm">
         <button class="btn btn--primary" type="button" data-action="login">
-          <span aria-hidden="true">✦</span>
-          <span>Entrar con Google</span>
+          <span aria-hidden="true">✦</span><span>Continuar con Google</span>
         </button>
+        <button class="btn btn--ghost" type="button" data-action="show-email-login" aria-expanded="false" aria-controls="emailLoginPanel">Entrar con otro correo</button>
+        <form class="stack stack--sm" id="emailLoginPanel" data-email-login-form hidden style="width:min(100%, 380px);margin:0 auto;text-align:left">
+          <label for="loginEmail">Correo registrado en Musicala</label>
+          <input class="input" id="loginEmail" name="email" type="email" autocomplete="username" inputmode="email" required placeholder="tu@correo.com">
+          <label for="loginPassword">Contraseña</label>
+          <input class="input" id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="Tu contraseña">
+          <button class="btn btn--primary" type="submit">Entrar con mi correo</button>
+          <button class="btn btn--ghost" type="button" data-action="reset-password">Olvidé mi contraseña</button>
+        </form>
       </div>
-
-      <p class="hero__note">
-        Inicia sesión con el mismo correo de Google que registraste en Musicala. 😊
-      </p>
+      <p class="hero__note">Usa Google para ingresar fácilmente. Si tu cuenta está vinculada a otro correo, puedes entrar con correo y contraseña.</p>
     </article>
   `;
 }
@@ -1540,7 +1548,21 @@ async function handleLoginClick() {
     toast(humanAuthError(error), "danger");
   }
 }
+async function handleEmailLoginSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector('[type="submit"]');
+  if (submit) submit.disabled = true;
+  try { await loginWithEmail(form.elements.email?.value || "", form.elements.password?.value || ""); }
+  catch (error) { console.error("[Auth] Error iniciando sesión con correo:", error); toast(humanAuthError(error), "danger"); }
+  finally { if (submit?.isConnected) submit.disabled = false; }
+}
 
+async function handlePasswordResetClick() {
+  const email = document.querySelector('[data-email-login-form] [name="email"]')?.value || "";
+  try { await resetEmailPassword(email); toast("Te enviamos un enlace para crear o restablecer tu contraseña. Revisa tu correo y la carpeta de spam.", "success"); }
+  catch (error) { console.error("[Auth] Error enviando restablecimiento:", error); toast(humanAuthError(error), "danger"); }
+}
 async function handleLogoutClick() {
   try {
     await logout();
@@ -1615,6 +1637,16 @@ function bindCoreHandlers() {
 
     const action = actionEl.getAttribute("data-action");
 
+    if (action === "show-email-login") {
+      const panel = document.querySelector("[data-email-login-form]");
+      if (panel) { panel.hidden = !panel.hidden; actionEl.setAttribute("aria-expanded", String(!panel.hidden)); if (!panel.hidden) panel.querySelector('[name="email"]')?.focus(); }
+      return;
+    }
+    if (action === "reset-password") {
+      await handlePasswordResetClick();
+      return;
+    }
+
     if (action === "login") {
       await handleLoginClick();
       return;
@@ -1652,6 +1684,15 @@ function bindCoreHandlers() {
 
   });
 
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.matches?.("[data-email-login-form]")) {
+      handleEmailLoginSubmit(event).catch((error) => {
+        console.error("[Auth] Error inesperado en formulario de acceso:", error);
+        toast(humanAuthError(error), "danger");
+      });
+    }
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeModal();

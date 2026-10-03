@@ -24,6 +24,8 @@ import {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   setPersistence,
   browserLocalPersistence,
@@ -293,6 +295,28 @@ export async function loginGoogle(options = {}) {
  * logout()
  * Cierra sesión.
  */
+/** Inicia sesión con el correo registrado y su contraseña de Firebase Auth. */
+export async function loginWithEmail(email, password) {
+  if (loginInFlight) return loginInFlight;
+  loginInFlight = (async () => {
+    try {
+      await applyPersistence();
+      const result = await signInWithEmailAndPassword(auth, String(email || "").trim().toLowerCase(), String(password || ""));
+      return result?.user || null;
+    } finally {
+      loginInFlight = null;
+    }
+  })();
+  return loginInFlight;
+}
+
+/** Envía el enlace seguro de recuperación al correo indicado. */
+export async function resetEmailPassword(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("Escribe primero tu correo electrónico.");
+  await sendPasswordResetEmail(auth, normalizedEmail);
+  return true;
+}
 export async function logout() {
   if (logoutInFlight) return logoutInFlight;
 
@@ -360,6 +384,11 @@ export function humanAuthError(error) {
   const code = String(error?.code || "");
   const message = String(error?.message || "");
 
+  if (code.includes("auth/invalid-credential") || code.includes("auth/wrong-password") || code.includes("auth/user-not-found")) {
+    return "El correo o la contraseña no coinciden. Si nunca has creado una contraseña, usa «Olvidé mi contraseña» para recibir un enlace.";
+  }
+  if (code.includes("auth/weak-password")) return "La contraseña debe tener al menos 6 caracteres.";
+  if (code.includes("auth/invalid-email")) return "Escribe un correo electrónico válido.";
   if (code.includes("auth/popup-closed-by-user")) {
     return "Cerraste la ventana de inicio de sesión.";
   }
