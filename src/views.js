@@ -54,6 +54,9 @@ import {
   joinClean,
 } from "./ui.js";
 
+import { callFunction } from "./firebase.js";
+import { downloadAiReportPdf, slugifyReportName } from "./ai-report-pdf.js";
+
 import {
   normalizePortalBundle,
   normalizeBitacoras,
@@ -3870,43 +3873,11 @@ function wireReportView(deps, student, studentId) {
     output.innerHTML = `<div class="card card--flat"><p class="note">Generando informe…</p></div>`;
 
     try {
-      let bitacoras = [], route = null, practiceLogs = [];
-
-      await Promise.allSettled([
-        (async () => {
-          if (typeof api.listBitacorasByStudent === "function") {
-            const all = await api.listBitacorasByStudent(studentId, { max: 200 }).catch(() => []);
-            bitacoras = all.filter((b) => {
-              const d = b.fechaClase || b.date || b.createdAt;
-              if (!d) return false;
-              const bd = new Date(d);
-              return bd.getFullYear() === year && bd.getMonth() === month;
-            });
-          }
-        })(),
-        (async () => {
-          if (
-            (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)) &&
-            typeof api.getStudentLearningRoute === "function"
-          ) {
-            route = await api.getStudentLearningRoute(student).catch(() => null);
-          } else if (typeof api.getStudentRoutes === "function") {
-            const routes = await api.getStudentRoutes(studentId).catch(() => []);
-            route = safeArray(routes)[0] || null;
-          }
-        })(),
-        (async () => {
-          if (typeof api.listPracticeLogs === "function") {
-            const all = await api.listPracticeLogs(studentId, { max: 200 }).catch(() => []);
-            practiceLogs = all.filter((l) => {
-              const d = l.date || l.createdAt;
-              if (!d) return false;
-              const ld = new Date(d);
-              return ld.getFullYear() === year && ld.getMonth() === month;
-            });
-          }
-        })(),
-      ]);
+      const inMonth = (value) => {
+        const date = new Date(value);
+        return date.getFullYear() === year && date.getMonth() === month;
+      };
+      const { bitacoras, route, practiceLogs } = await loadReportData(api, student, studentId, inMonth);
 
       const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
       const periodLabel      = `${MONTHS[month]} ${year}`;
@@ -3992,6 +3963,277 @@ function wireReportView(deps, student, studentId) {
   });
 }
 
+/* =============================================================================
+  Informe con IA (PDF)
+
+  El navegador arma el expediente con lo que el estudiante ya puede leer y la
+  Cloud Function generateStudentReport (bitacoras-de-clase) se lo pasa a
+  Gemini. La instrucción de redacción vive en el servidor.
+============================================================================= */
+
+const AI_REPORT_PERIODS = Object.freeze([
+  { value: "1", label: "Último mes", months: 1, periodLabel: "el último mes" },
+  { value: "3", label: "Últimos 3 meses", months: 3, periodLabel: "los últimos 3 meses" },
+  { value: "6", label: "Últimos 6 meses", months: 6, periodLabel: "los últimos 6 meses" },
+  { value: "all", label: "Todo el proceso", months: 0, periodLabel: "" },
+]);
+
+const AI_REPORT_TONES = Object.freeze([
+  { value: "sencillo", label: "Lenguaje sencillo", hint: "Explica los conceptos desde cero. Ideal para familias." },
+  { value: "tecnico", label: "Lenguaje técnico", hint: "Usa los términos del instrumento, sin explicarlos." },
+]);
+
+function getStudentAliasIds(student = {}, studentId = "") {
+  return [...new Set([
+    studentId,
+    getStudentIdentity(student),
+    getStudentFallbackId(student),
+    student?.canonicalStudentId,
+    student?.studentKey,
+    student?.id,
+    student?.studentId,
+    student?.academicRecordId,
+    ...(Array.isArray(student?.linkedStudentIds) ? student.linkedStudentIds : []),
+  ].map((id) => uiSafeText(id, "")).filter(Boolean))];
+}
+
+function getBitacoraOverrideForStudent(item = {}, aliasIds = []) {
+  const overrides = item.studentOverrides || item.overrides || {};
+  for (const alias of aliasIds) {
+    if (overrides[alias] && typeof overrides[alias] === "object") return overrides[alias];
+  }
+  return null;
+}
+
+function formatOverrideForAi(override = null) {
+  if (!override) return "";
+  const labels = {
+    tareas: "Tareas / observaciones",
+    componenteCorporal: "Componente corporal",
+    componenteTecnico: "Componente técnico",
+    componenteTeorico: "Componente teórico",
+    componenteObras: "Componente de obras",
+    etiquetas: "Etiquetas",
+  };
+  return Object.entries(labels)
+    .map(([key, label]) => {
+      const value = override[key];
+      const textValue = Array.isArray(value)
+        ? value.map((item) => uiSafeText(item, "")).filter(Boolean).join("; ")
+        : uiSafeText(value, "");
+      return textValue ? `  - ${label}: ${textValue}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildHubAiDossier({ student, bitacoras, route, practiceLogs, periodLabel, aliasIds }) {
+  const name = getStudentDisplayName(student);
+  const area = uiSafeText(student?.instrumento || student?.area || student?.programa || student?.program, "Sin registrar");
+  const works = normalizedWorks(student);
+  const workStatus = { quiere: "quiere trabajarla", proceso: "en proceso", lograda: "lograda" };
+  const goals = safeArray(route?.goals || route?.objetivos || []);
+  const doneGoals = goals.filter((goal) => isDoneStatus(getGoalStatus(goal)));
+  const pendingGoals = goals.filter((goal) => !isDoneStatus(getGoalStatus(goal)));
+  const practiceMinutes = practiceLogs.reduce((sum, log) => sum + (Number(log.minutes) || 0), 0);
+  const sorted = [...bitacoras].sort((a, b) =>
+    new Date(a.fechaClase || a.date || a.createdAt) - new Date(b.fechaClase || b.date || b.createdAt));
+
+  const lines = [
+    `# Expediente de proceso — ${name}`,
+    "",
+    "## Datos generales",
+    `- **Nombre:** ${name}`,
+    `- **Área / instrumento:** ${area}`,
+    student?.edad || student?.age ? `- **Edad:** ${uiSafeText(student.edad || student.age, "")}` : null,
+    `- **Período del informe:** ${periodLabel || "Todo el proceso"}`,
+    `- **Clases registradas en el período:** ${sorted.length}`,
+    practiceLogs.length ? `- **Práctica propia registrada:** ${practiceLogs.length} sesiones, ${practiceMinutes} minutos` : null,
+    "",
+    "## Repertorio del proceso",
+    works.length
+      ? works.map((work) => `- ${work.nombre} (${workStatus[work.estado] || work.estado})`).join("\n")
+      : "- Aún no hay repertorio registrado.",
+  ];
+
+  if (goals.length) {
+    lines.push(
+      "",
+      "## Ruta de aprendizaje",
+      route?.routeName || route?.title ? `- **Ruta:** ${uiSafeText(route.routeName || route.title, "")}` : null,
+      `- **Avance:** ${doneGoals.length}/${goals.length} objetivos`,
+      doneGoals.length ? `\n### Objetivos completados\n${doneGoals.map((goal, i) => `- ${getGoalTitle(goal, i)}`).join("\n")}` : null,
+      pendingGoals.length && pendingGoals.length <= 40
+        ? `\n### Objetivos pendientes\n${pendingGoals.map((goal, i) => `- ${getGoalTitle(goal, i)}`).join("\n")}`
+        : null
+    );
+  }
+
+  lines.push("", `## Bitácoras de clase (${sorted.length})`);
+  sorted.forEach((item) => {
+    const override = formatOverrideForAi(getBitacoraOverrideForStudent(item, aliasIds));
+    const tagList = safeArray(item.tags || item.etiquetas).map((tag) => uiSafeText(tag, "")).filter(Boolean);
+    const process = getProcessLabel(item);
+    const author = getAuthorName(item);
+    const content = getBitacoraContent(item);
+    lines.push(
+      "",
+      `### ${formatDate(item.fechaClase || item.date || item.createdAt) || "Sin fecha"} — ${getBitacoraTitle(item)}`,
+      process ? `- **Proceso:** ${process}` : null,
+      author ? `- **Docente:** ${author}` : null,
+      tagList.length ? `- **Etiquetas:** ${tagList.join("; ")}` : null,
+      content ? `- **Contenido:**\n${content}` : null,
+      override ? `- **Ajustes específicos para este estudiante:**\n${override}` : null
+    );
+  });
+
+  return lines.filter((line) => line !== null).join("\n");
+}
+
+function isWithinMonths(value, months) {
+  if (!months) return true;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const from = new Date();
+  from.setMonth(from.getMonth() - months);
+  return date >= from;
+}
+
+function renderAiReportCard() {
+  const periodOptions = AI_REPORT_PERIODS
+    .map((period, index) => `<option value="${period.value}" ${index === 1 ? "selected" : ""}>${escapeHtml(period.label)}</option>`)
+    .join("");
+  const toneOptions = AI_REPORT_TONES
+    .map((tone, index) => `
+      <label class="ai-report-tone">
+        <input type="radio" name="aiReportTone" value="${tone.value}" ${index === 0 ? "checked" : ""} />
+        <span><strong>${escapeHtml(tone.label)}</strong><small>${escapeHtml(tone.hint)}</small></span>
+      </label>`)
+    .join("");
+
+  return card({
+    title: "Informe con IA",
+    subtitle: "La IA lee las bitácoras de tus clases y redacta un informe de tu proceso, listo para descargar en PDF.",
+    bodyHTML: `
+      <div class="routine-setup">
+        <div class="routine-setup__row">
+          <label class="routine-label" for="aiReportPeriod">Período</label>
+          <select id="aiReportPeriod" class="practice-form__input">${periodOptions}</select>
+        </div>
+        <fieldset class="ai-report-tones">
+          <legend class="routine-label">Lenguaje del informe</legend>
+          ${toneOptions}
+        </fieldset>
+        <div class="cluster">
+          <button class="btn btn--primary" type="button" id="btnAiReport">
+            <span aria-hidden="true">✦</span>
+            <span>Descargar informe en PDF</span>
+          </button>
+        </div>
+        <p class="note" id="aiReportStatus" role="status" aria-live="polite"></p>
+      </div>
+    `,
+  });
+}
+
+function getAiReportErrorMessage(error) {
+  const code = String(error?.code || "");
+  if (code === "functions/unauthenticated") return "Tu sesión expiró. Vuelve a iniciar sesión.";
+  if (code === "functions/deadline-exceeded") return "La IA tardó demasiado. Intenta con un período más corto.";
+  if (code.startsWith("functions/") && code !== "functions/internal") {
+    return error?.message || "La IA no pudo redactar el informe. Intenta de nuevo.";
+  }
+  return "No se pudo generar el informe. Revisa tu conexión e intenta de nuevo.";
+}
+
+function wireAiReport(deps, student, studentId) {
+  const api = getApi(deps);
+  const button = document.getElementById("btnAiReport");
+  const status = document.getElementById("aiReportStatus");
+  if (!button) return;
+
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    const periodValue = document.getElementById("aiReportPeriod")?.value;
+    const period = AI_REPORT_PERIODS.find((item) => item.value === periodValue) || AI_REPORT_PERIODS[1];
+    const tone = document.querySelector('input[name="aiReportTone"]:checked')?.value || "sencillo";
+    const originalHTML = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `<span aria-hidden="true">✦</span><span>Redactando…</span>`;
+    if (status) status.textContent = "La IA está redactando tu informe. Puede tardar hasta un minuto.";
+
+    try {
+      const inPeriod = (value) => isWithinMonths(value, period.months);
+      const data = await loadReportData(api, student, studentId, inPeriod);
+      if (!data.bitacoras.length) {
+        if (status) status.textContent = "No hay bitácoras en ese período. Prueba con un período más largo.";
+        return;
+      }
+      const aliasIds = getStudentAliasIds(student, studentId);
+      const result = await callFunction("generateStudentReport", {
+        studentId,
+        studentIds: aliasIds,
+        dossier: buildHubAiDossier({ student, ...data, periodLabel: period.periodLabel, aliasIds }),
+        tone,
+        periodLabel: period.periodLabel,
+      });
+      const name = getStudentDisplayName(student);
+      await downloadAiReportPdf({
+        markdown: result?.markdown || "",
+        studentName: name,
+        periodLabel: period.periodLabel,
+        fileName: `informe-${slugifyReportName(name)}-${period.value === "all" ? "todo-el-proceso" : `${period.value}-meses`}`,
+      });
+      if (status) status.textContent = "Listo. Tu informe se descargó.";
+    } catch (error) {
+      console.error("[views] No se pudo generar el informe con IA:", error);
+      if (status) status.textContent = getAiReportErrorMessage(error);
+    } finally {
+      button.disabled = false;
+      button.innerHTML = originalHTML;
+    }
+  });
+}
+
+// Bitácoras, ruta y práctica del estudiante; includeDate filtra el período.
+async function loadReportData(api, student, studentId, includeDate) {
+  let bitacoras = [], route = null, practiceLogs = [];
+
+  await Promise.allSettled([
+    (async () => {
+      if (typeof api.listBitacorasByStudent === "function") {
+        const all = await api.listBitacorasByStudent(studentId, { max: 200, student }).catch(() => []);
+        bitacoras = all.filter((b) => {
+          const d = b.fechaClase || b.date || b.createdAt;
+          return d ? includeDate(d) : false;
+        });
+      }
+    })(),
+    (async () => {
+      if (
+        (api.isPianoCurriculumStudent?.(student) || api.isGuitarCurriculumStudent?.(student) || api.isViolinCurriculumStudent?.(student) || api.isBateriaCurriculumStudent?.(student)) &&
+        typeof api.getStudentLearningRoute === "function"
+      ) {
+        route = await api.getStudentLearningRoute(student).catch(() => null);
+      } else if (typeof api.getStudentRoutes === "function") {
+        const routes = await api.getStudentRoutes(studentId).catch(() => []);
+        route = safeArray(routes)[0] || null;
+      }
+    })(),
+    (async () => {
+      if (typeof api.listPracticeLogs === "function") {
+        const all = await api.listPracticeLogs(studentId, { max: 200 }).catch(() => []);
+        practiceLogs = all.filter((l) => {
+          const d = l.date || l.createdAt;
+          return d ? includeDate(d) : false;
+        });
+      }
+    })(),
+  ]);
+
+  return { bitacoras, route, practiceLogs };
+}
+
 async function renderReport(deps) {
   const ctx       = getCtx(deps);
   const api       = getApi(deps);
@@ -4007,11 +4249,13 @@ async function renderReport(deps) {
   const yearOpts  = [cy, cy - 1, cy - 2].map((y) => `<option value="${y}" ${y === cy ? "selected" : ""}>${y}</option>`).join("");
 
   const html = `
-    ${viewHeader("Informe mensual", studentSubtitle(ctx), { eyebrow: "Reportes de avance" })}
+    ${viewHeader("Informes", studentSubtitle(ctx), { eyebrow: "Reportes de avance" })}
 
     ${stack(`
+      ${renderAiReportCard()}
+
       ${card({
-        title: "Generar informe",
+        title: "Informe mensual",
         subtitle: "Selecciona el período y genera tu reporte de avance.",
         bodyHTML: `
           <div class="routine-setup">
@@ -4037,7 +4281,13 @@ async function renderReport(deps) {
     `)}
   `;
 
-  return { html, afterRender: () => wireReportView(deps, student, studentId) };
+  return {
+    html,
+    afterRender: () => {
+      wireAiReport(deps, student, studentId);
+      wireReportView(deps, student, studentId);
+    },
+  };
 }
 
 function normalizedWorks(student = {}) {

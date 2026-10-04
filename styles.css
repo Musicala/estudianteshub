@@ -3775,6 +3775,49 @@ textarea.input {
   text-transform: uppercase;
 }
 
+/* Informe con IA: selección de lenguaje */
+.ai-report-tones {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ai-report-tones legend {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.ai-report-tone {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.ai-report-tone:has(input:checked) {
+  border-color: var(--info);
+  box-shadow: 0 0 0 1px var(--info);
+}
+
+.ai-report-tone input {
+  margin-top: 3px;
+}
+
+.ai-report-tone span {
+  display: grid;
+  gap: 2px;
+}
+
+.ai-report-tone small {
+  color: var(--muted);
+}
+
 .routine-slider-wrap {
   display: grid;
   grid-template-columns: 1fr auto;

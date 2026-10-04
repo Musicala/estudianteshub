@@ -161,6 +161,16 @@ export const firebase = Object.freeze({
   Helpers públicos
 ============================================================================= */
 
+// Cloud Functions de bitacoras-de-clase (carga diferida: solo el informe con IA).
+export async function callFunction(name, data = {}, { timeout = 70000 } = {}) {
+  const { getFunctions, httpsCallable } = await import(
+    "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js"
+  );
+  const callable = httpsCallable(getFunctions(app, "us-central1"), name, { timeout });
+  const result = await callable(data);
+  return result.data;
+}
+
 export function getFirebaseApp() {
   return app;
 }

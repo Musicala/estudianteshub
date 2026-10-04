@@ -14,7 +14,7 @@ const APP_NAME = "estudiantes-hub-musicala";
   Eso obliga al Service Worker a reinstalarse, limpiar el caché viejo y
   recargar a los estudiantes a la última versión (también en iPhone).
 */
-const CACHE_VERSION = "v2.3.4-login-curriculum-2026-10-03.2";
+const CACHE_VERSION = "v2.3.5-informe-ia-2026-10-04.1";
 
 const STATIC_CACHE = `${APP_NAME}-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `${APP_NAME}-runtime-${CACHE_VERSION}`;
@@ -43,6 +43,7 @@ const APP_SHELL = [
   "./src/ui.js",
   "./src/views.js",
   "./src/musiprofe.js",
+  "./src/ai-report-pdf.js",
 
   "./assets/logo.png",
   "./assets/musiprofe.png",
