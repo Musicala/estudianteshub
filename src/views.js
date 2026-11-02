@@ -1,3 +1,7 @@
+function biblioCatalogLabel(value) {
+  const labels = { "por-evaluar": "Por evaluar", todos: "Sin nivel específico", inicial: "Inicial", basico: "Básico", intermedio: "Intermedio", avanzado: "Avanzado", tecnica: "Técnica", metodo: "Método", "material-apoyo": "Material de apoyo", planificacion: "Planificación", "lectura-musical": "Lectura musical", "armonia-y-acordes": "Armonía y acordes", "coordinacion-e-independencia": "Coordinación e independencia", "afinacion-y-oido": "Afinación y oído", "interpretacion-y-ensamble": "Interpretación y ensamble", "cuidado-corporal": "Cuidado corporal", "planeacion-docente": "Planeación docente", "expresion-visual": "Expresión visual", "expresion-corporal": "Expresión corporal", "hoja-de-calculo": "Hoja de cálculo", numeros: "Números", presentacion: "Presentación", pdf: "PDF" };
+  return labels[value] || String(value || "").replaceAll("-", " ").replace(/^./, c => c.toUpperCase());
+}
 "use strict";
 
 /* =============================================================================
@@ -1989,6 +1993,8 @@ async function renderResources(deps) {
   RES_NAV.tipo = "";
   RES_NAV.nivel = "";
   RES_NAV.categoria = "";
+  RES_NAV.objetivo = "";
+  RES_NAV.formato = "";
   RES_NAV.shown = 60;
 
   const tipos = [...new Set(
@@ -2014,8 +2020,11 @@ async function renderResources(deps) {
           <option value="">Tipo: todos</option>
           ${tipos.map((t) => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join("")}
         </select>
-        <select id="biblio-nivel" class="biblioSelect" aria-label="Dificultad"><option value="">Dificultad: todos</option>${[...new Set(resources.map(r => r.nivel).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v === "todos" ? "Todos los niveles (por verificar)" : v)}</option>`).join("")}</select>
-        <select id="biblio-categoria" class="biblioSelect" aria-label="Objetivo / categoría"><option value="">Objetivo / categoría: todos</option>${[...new Set(resources.map(r => r.categoria).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v === "todos" ? "Todos los niveles (por verificar)" : v)}</option>`).join("")}</select>
+        <select id="biblio-nivel" class="biblioSelect" aria-label="Dificultad"><option value="">Dificultad: todos</option>${[...new Set(resources.map(r => r.nivel).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
+        <select id="biblio-categoria" class="biblioSelect" aria-label="Categoría"><option value="">Categoría: todos</option>${[...new Set(resources.map(r => r.categoria).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
+        <select id="biblio-objetivo" class="biblioSelect" aria-label="Objetivo"><option value="">Objetivo: todos</option>${[...new Set(resources.flatMap(r => r.objetivos || []))].sort().map(v => `<option value="${escapeHtml(v)}" >${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
+        <select id="biblio-formato" class="biblioSelect" aria-label="Formato"><option value="">Formato: todos</option>${[...new Set(resources.flatMap(r => r.formatos || []))].sort().map(v => `<option value="${escapeHtml(v)}" >${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
+        <button type="button" class="btn btn--ghost" id="biblio-global">Buscar en toda mi biblioteca</button>
       </div>
       <nav class="biblioCrumbs" id="biblioCrumbs" aria-label="Ruta de carpetas"></nav>
       <p class="biblioMeta" id="biblioMeta"></p>
@@ -2148,6 +2157,7 @@ function renderBiblioCard(resource = {}) {
       <div class="biblioCardTop">
         <span class="biblioArea">${bibEmoji(area)} ${escapeHtml(area)}</span>
         ${tipo ? `<span class="biblioTipo">${escapeHtml(tipo)}</span>` : ""}
+        ${resource.nivel ? `<span class="biblioTipo">${escapeHtml(biblioCatalogLabel(resource.nivel))}</span>` : ""}
       </div>
       <h3 class="biblioTitle">${escapeHtml(uiSafeText(resource.title || resource.titulo) || "Sin título")}</h3>
       ${tema ? `<p class="biblioTema">📂 ${escapeHtml(tema)}</p>` : ""}
@@ -2249,7 +2259,7 @@ function wireBiblioteca(resources) {
   };
 
   const paintRecursos = (lista) => {
-    const filtered = lista.filter(r => (!RES_NAV.tipo || String(r.tipo || r.type || "").trim() === RES_NAV.tipo) && (!RES_NAV.nivel || r.nivel === RES_NAV.nivel) && (!RES_NAV.categoria || r.categoria === RES_NAV.categoria));
+    const filtered = lista.filter(r => (!RES_NAV.tipo || String(r.tipo || r.type || "").trim() === RES_NAV.tipo) && (!RES_NAV.nivel || r.nivel === RES_NAV.nivel) && (!RES_NAV.categoria || r.categoria === RES_NAV.categoria) && (!RES_NAV.objetivo || (r.objetivos || []).includes(RES_NAV.objetivo)) && (!RES_NAV.formato || (r.formatos || []).includes(RES_NAV.formato)));
     if (!filtered.length) {
       grid.classList.remove("biblioGridFolders");
       grid.innerHTML = `<div class="biblioEmpty"><h2>Sin resultados</h2><p>Prueba con otra búsqueda o quita los filtros.</p></div>`;
@@ -2271,7 +2281,7 @@ function wireBiblioteca(resources) {
     }
 
     const term = bibNorm(RES_NAV.search);
-    if (term || RES_NAV.nivel || RES_NAV.categoria || RES_NAV.tipo) {
+    if (term || RES_NAV.nivel || RES_NAV.categoria || RES_NAV.tipo || RES_NAV.objetivo || RES_NAV.formato) {
       let source = resources;
       if (RES_NAV.arte) source = source.filter((r) => bibMacroArea(r.area || r.instrument || r.instrumento) === RES_NAV.arte);
       if (RES_NAV.area) source = source.filter((r) => (uiSafeText(r.area || r.instrument || r.instrumento) || "General") === RES_NAV.area);
@@ -2280,7 +2290,7 @@ function wireBiblioteca(resources) {
       const matches = source.filter((r) => {
         const hay = bibNorm([
           r.title, r.titulo, r.tema, r.area, r.tipo, r.type, r.description, r.descripcion, r.nivel, r.categoria, r.especialidad, r.cancion?.artista, r.cancion?.genero, r.cancion?.tonalidad,
-          ...safeArray(r.tags || r.etiquetas),
+          ...safeArray(r.tags || r.etiquetas), ...(r.objetivos || []), ...(r.formatos || []),
         ].filter(Boolean).join(" "));
         return term.split(/\s+/).filter(Boolean).every(token => hay.includes(token));
       });
@@ -2341,6 +2351,9 @@ function wireBiblioteca(resources) {
     RES_NAV.shown = 60;
     paint();
   });
+  root.querySelector("#biblio-objetivo")?.addEventListener("change", e => { RES_NAV.objetivo = e.target.value; RES_NAV.shown = 60; paint(); });
+  root.querySelector("#biblio-formato")?.addEventListener("change", e => { RES_NAV.formato = e.target.value; RES_NAV.shown = 60; paint(); });
+  root.querySelector("#biblio-global")?.addEventListener("click", () => { RES_NAV.arte = null; RES_NAV.area = null; RES_NAV.tema = null; RES_NAV.shown = 60; paint(); });
   root.querySelector("#biblio-nivel")?.addEventListener("change", e => { RES_NAV.nivel = e.target.value; RES_NAV.shown = 60; paint(); });
   root.querySelector("#biblio-categoria")?.addEventListener("change", e => { RES_NAV.categoria = e.target.value; RES_NAV.shown = 60; paint(); });
   tipoSelect?.addEventListener("change", (e) => {
