@@ -2709,7 +2709,7 @@ function isResourceVisibleForStudent(resource, ctx) {
 export async function listResources(options = {}) {
   try {
     const {
-      max = LIMITS?.maxResourcesPage || DEFAULT_MAX,
+      max = null,
       student = null,
       studentId = null,
       activeOnly = true,
@@ -2719,7 +2719,7 @@ export async function listResources(options = {}) {
     // un estudiante de un instrumento puede ver cientos de recursos (su material +
     // el general de su arte). Con 120 se quedaban fuera muchos (p. ej. las listas
     // de repertorio), aunque el panel admin sí los veía.
-    const finalMax = clampLimit(max, DEFAULT_MAX, 1500);
+    const finalMax = max == null ? null : clampLimit(max, DEFAULT_MAX, 1500);
 
     /*
       Los recursos viven en el proyecto biblioteca-guitarra-fa182,
@@ -2728,26 +2728,18 @@ export async function listResources(options = {}) {
     */
     const resourcesRef = collection(libraryDb, LIBRARY_COLLECTIONS.resources);
 
-    /*
-      Se leen TODOS los recursos (la biblioteca tiene ~200) y el filtro de
-      "publicado" se hace en cliente, sin where("estado","=="...), porque el
-      estado puede venir con mayúsculas o tildes ("Publicado") y un where exacto
-      en minúscula los descartaba silenciosamente. El filtro por área/instrumento
-      también es en cliente por la misma razón.
-    */
-    const fetchCap = 1000;
-
-    const primary = query(
-      resourcesRef,
-      limit(fetchCap)
-    );
-
-    const fallback = query(
-      resourcesRef,
-      limit(fetchCap)
-    );
-
-    const snap = await getDocsSafe(primary, fallback, "listResources");
+    // Leer todas las páginas antes de filtrar por estudiante. Un límite global
+    // descarta materiales válidos según su ID, antes de comprobar el área.
+    const resourceItems = [];
+    let cursor = null;
+    while (true) {
+      const constraints = [orderBy(documentId()), limit(500)];
+      if (cursor) constraints.push(startAfter(cursor));
+      const page = await getDocs(query(resourcesRef, ...constraints));
+      resourceItems.push(...docsToObjects(page));
+      if (page.size < 500) break;
+      cursor = page.docs[page.docs.length - 1];
+    }
 
     let studentData = student;
 
@@ -2771,14 +2763,14 @@ export async function listResources(options = {}) {
       excluded: getStudentExcludedResourceIds(studentData),
     };
 
-    let resources = docsToObjects(snap)
+    let resources = resourceItems
       .map((item) => normalizeResource(item))
       .filter(Boolean)
       .filter((resource) => isResourceVisibleForStudent(resource, visibilityCtx));
 
     resources = sortByText(resources, "title", "asc");
 
-    return resources.slice(0, finalMax);
+    return finalMax == null ? resources : resources.slice(0, finalMax);
   } catch (error) {
     throw withContextError(error, "listResources");
   }

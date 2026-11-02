@@ -1960,10 +1960,9 @@ async function renderResources(deps) {
     items = await api.listResources({
       student,
       studentId: getStudentId(ctx),
-      max: 1500,
     }).catch(() => []);
   } else if (typeof api.listLibraryPins === "function") {
-    items = await api.listLibraryPins(getStudentId(ctx), 1500).catch(() => []);
+    items = await api.listLibraryPins(getStudentId(ctx), null).catch(() => []);
   }
 
   const resources = normalizeResources(items);
@@ -1988,6 +1987,8 @@ async function renderResources(deps) {
   RES_NAV.tema = null;
   RES_NAV.search = "";
   RES_NAV.tipo = "";
+  RES_NAV.nivel = "";
+  RES_NAV.categoria = "";
   RES_NAV.shown = 60;
 
   const tipos = [...new Set(
@@ -2013,6 +2014,8 @@ async function renderResources(deps) {
           <option value="">Tipo: todos</option>
           ${tipos.map((t) => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join("")}
         </select>
+        <select id="biblio-nivel" class="biblioSelect" aria-label="Dificultad"><option value="">Dificultad: todos</option>${[...new Set(resources.map(r => r.nivel).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v === "todos" ? "Todos los niveles (por verificar)" : v)}</option>`).join("")}</select>
+        <select id="biblio-categoria" class="biblioSelect" aria-label="Objetivo / categoría"><option value="">Objetivo / categoría: todos</option>${[...new Set(resources.map(r => r.categoria).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v === "todos" ? "Todos los niveles (por verificar)" : v)}</option>`).join("")}</select>
       </div>
       <nav class="biblioCrumbs" id="biblioCrumbs" aria-label="Ruta de carpetas"></nav>
       <p class="biblioMeta" id="biblioMeta"></p>
@@ -2246,9 +2249,7 @@ function wireBiblioteca(resources) {
   };
 
   const paintRecursos = (lista) => {
-    const filtered = RES_NAV.tipo
-      ? lista.filter((r) => uiSafeText(r.tipo || r.type) === RES_NAV.tipo)
-      : lista;
+    const filtered = lista.filter(r => (!RES_NAV.tipo || String(r.tipo || r.type || "").trim() === RES_NAV.tipo) && (!RES_NAV.nivel || r.nivel === RES_NAV.nivel) && (!RES_NAV.categoria || r.categoria === RES_NAV.categoria));
     if (!filtered.length) {
       grid.classList.remove("biblioGridFolders");
       grid.innerHTML = `<div class="biblioEmpty"><h2>Sin resultados</h2><p>Prueba con otra búsqueda o quita los filtros.</p></div>`;
@@ -2270,7 +2271,7 @@ function wireBiblioteca(resources) {
     }
 
     const term = bibNorm(RES_NAV.search);
-    if (term) {
+    if (term || RES_NAV.nivel || RES_NAV.categoria || RES_NAV.tipo) {
       let source = resources;
       if (RES_NAV.arte) source = source.filter((r) => bibMacroArea(r.area || r.instrument || r.instrumento) === RES_NAV.arte);
       if (RES_NAV.area) source = source.filter((r) => (uiSafeText(r.area || r.instrument || r.instrumento) || "General") === RES_NAV.area);
@@ -2278,10 +2279,10 @@ function wireBiblioteca(resources) {
 
       const matches = source.filter((r) => {
         const hay = bibNorm([
-          r.title, r.titulo, r.tema, r.area, r.tipo, r.type, r.description, r.descripcion,
+          r.title, r.titulo, r.tema, r.area, r.tipo, r.type, r.description, r.descripcion, r.nivel, r.categoria, r.especialidad, r.cancion?.artista, r.cancion?.genero, r.cancion?.tonalidad,
           ...safeArray(r.tags || r.etiquetas),
         ].filter(Boolean).join(" "));
-        return hay.includes(term);
+        return term.split(/\s+/).filter(Boolean).every(token => hay.includes(token));
       });
       const n = paintRecursos(matches);
       if (meta) meta.textContent = `${n} resultado(s)${scopeLabel ? ` en ${scopeLabel}` : ""}`;
@@ -2340,6 +2341,8 @@ function wireBiblioteca(resources) {
     RES_NAV.shown = 60;
     paint();
   });
+  root.querySelector("#biblio-nivel")?.addEventListener("change", e => { RES_NAV.nivel = e.target.value; RES_NAV.shown = 60; paint(); });
+  root.querySelector("#biblio-categoria")?.addEventListener("change", e => { RES_NAV.categoria = e.target.value; RES_NAV.shown = 60; paint(); });
   tipoSelect?.addEventListener("change", (e) => {
     RES_NAV.tipo = e.target.value;
     RES_NAV.shown = 60;
