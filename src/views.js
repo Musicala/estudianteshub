@@ -874,7 +874,7 @@ async function renderProfile(deps) {
 
   const rows = getStudentProfileRows(student);
 
-  const accessRows = [
+  const accessRows = ctx.isViewingAsStudent ? [["Vista", "Estudiante · la sesión del equipo se mantiene separada"]] : [
     ["Correo de acceso", ctx.user?.email || ""],
     ["Rol", ctx.accessProfile?.role || ctx.userCtx?.role || ""],
     ["Estado de acceso", ctx.accessProfile?.active === false ? "Inactivo" : "Activo"],

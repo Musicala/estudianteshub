@@ -1,5 +1,7 @@
 "use strict";
 
+import { studentViewContext } from "./student-view-context.js";
+
 /* =============================================================================
   src/app.js — Estudiantes HUB · Musicala
   Rol: Orquestador principal
@@ -737,9 +739,17 @@ async function setActiveStudent(studentId, options = {}) {
   // La selección debe usar el mismo perfil consolidado que la carga inicial.
   // En identidades ya reconciliadas el documento canónico contiene acceso/RIP
   // y el académico contiene repertorio; leer solo uno ocultaba las obras.
+  // Conservar los expedientes ya leídos: el documento principal puede no
+  // declarar el vínculo inverso al expediente que contiene el otro instrumento.
+  const cachedStudent = state.studentsById.get(id);
+  const knownIds = [...new Set([
+    id,
+    ...(state.viewAsStudentId ? [] : Array.isArray(cachedStudent?.linkedStudentIds) ? cachedStudent.linkedStudentIds : []),
+  ].map((value) => safeText(value)).filter(Boolean))];
   const resolved = typeof api.getStudentsByIds === "function"
-    ? await api.getStudentsByIds([id])
+    ? await api.getStudentsByIds(knownIds)
     : [];
+  if (state.viewAsStudentId && !resolved.length) throw new Error("No se pudo cargar el perfil actualizado del estudiante.");
   const student = resolved[0] || await getStudentById(id);
 
   if (!student) {
@@ -1071,6 +1081,7 @@ async function enterStudentView(studentId) {
     return;
   }
 
+  const previousView = { studentId: state.studentId, student: state.student, viewAsStudentId: state.viewAsStudentId };
   try {
     setBusy(true);
 
@@ -1085,6 +1096,10 @@ async function enterStudentView(studentId) {
 
     toast(`Viendo como ${getStudentName(state.student, "estudiante")}.`, "success");
   } catch (error) {
+    Object.assign(state, previousView);
+    persistActiveStudentId(previousView.studentId);
+    setStudentLabel();
+    ensureViewAsBanner();
     console.error("[App] Error entrando a vista de estudiante:", error);
     toast("No se pudo abrir la vista del estudiante.", "danger");
   } finally {
@@ -1186,7 +1201,7 @@ function wireMoreSheet() {
   Dependencias para vistas
 ============================================================================= */
 function getContext() {
-  return {
+  return studentViewContext({
     app: APP,
 
     user: state.user,
@@ -1209,7 +1224,7 @@ function getContext() {
     viewAsStudentId: state.viewAsStudentId,
     isViewingAsStudent: Boolean(state.viewAsStudentId),
     lastError: state.lastError,
-  };
+  });
 }
 
 function getViewDeps() {

@@ -9,7 +9,9 @@ const browser=await chromium.launch({headless:true,channel:'msedge'});
 const page=await browser.newPage({viewport:{width:390,height:844},serviceWorkers:'block'});
 const staged=path.resolve('../output/estudiantes-recursos-20261104/public');
 await page.route('https://musicala-estudianteshub.web.app/resource-smoke',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"></head><body><main id="view" style="padding:16px"></main></body></html>'}));
-if(!process.env.RESOURCES_LIVE) await page.route('**/src/data.js',r=>r.fulfill({contentType:'text/javascript',path:path.join(staged,'src/data.js')}));
+if(!process.env.RESOURCES_LIVE) {
+  for(const file of ['data.js','student-view-context.js','views.js']) await page.route('**/src/'+file,r=>r.fulfill({contentType:'text/javascript',path:path.join(staged,'src',file)}));
+}
 try {
   await page.goto('https://musicala-estudianteshub.web.app/resource-smoke');
   const result=await page.evaluate(async()=>{
@@ -17,6 +19,9 @@ try {
     const student={id:'resource-check',nombre:'Estudiante de Piano',area:'Música',instrument:'Piano',processes:[{arte:'Música',detalle:'Piano'}]};
     const items=await api.listResources({student});
     const render=await renderRoute('resources',{ctx:{user:{uid:'read-only-check'},studentId:student.id,student},api:{listResources:async()=>items}});
+    const {studentViewContext}=await import('/src/student-view-context.js');
+    const preview=await renderRoute('resources',{ctx:studentViewContext({user:{uid:'admin'},studentId:student.id,student,isViewingAsStudent:true,isAdmin:true,isInternal:true,accessProfile:{role:'admin'}}),api:{listResources:async()=>items}});
+    if(preview.html!==render.html) throw Error('El contenido de recursos difiere en previsualización');
     document.querySelector('#view').innerHTML=render.html;render.afterRender();
     return {total:items.length,piano:items.filter(r=>r.especialidad==='piano').length,teoria:items.filter(r=>r.especialidad==='teoria-musical').length};
   });
@@ -25,5 +30,5 @@ try {
   assert.match(await page.locator('#biblioGrid').innerText(),/402 recurso/);
   assert.match(await page.locator('#biblioGrid').innerText(),/43 recurso/);
   await mkdir('tests/artifacts',{recursive:true});await page.screenshot({path:'tests/artifacts/resources-mobile.png',fullPage:true});
-  console.log(JSON.stringify({realFirestoreRead:true,mobileFolders:true,...result,live:Boolean(process.env.RESOURCES_LIVE)}));
+  console.log(JSON.stringify({realFirestoreRead:true,mobileFolders:true,previewParity:true,...result,live:Boolean(process.env.RESOURCES_LIVE)}));
 } finally {await browser.close();}
