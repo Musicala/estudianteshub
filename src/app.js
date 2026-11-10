@@ -1421,10 +1421,12 @@ function renderBootError(title, message, actionHTML = "") {
   `;
 }
 
+let renderGeneration = 0;
 async function render(route) {
   if (!els.view) return;
 
   const normalizedRoute = normalizeRoute(route);
+  const generation = ++renderGeneration;
 
   state.currentRoute = normalizedRoute;
   state.isRendering = true;
@@ -1491,7 +1493,9 @@ async function render(route) {
       return;
     }
 
+    els.view.innerHTML = renderLoading("Abriendo sección", "Estamos preparando tu información…");
     const output = await renderRoute(normalizedRoute, getViewDeps());
+    if (generation !== renderGeneration) return;
 
     let html = "";
     let afterRender = null;
@@ -1510,6 +1514,7 @@ async function render(route) {
       await afterRender(getViewDeps());
     }
   } catch (error) {
+    if (generation !== renderGeneration) return;
     console.error("[App] Error renderizando vista:", error);
 
     state.lastError = error;
@@ -1537,8 +1542,10 @@ async function render(route) {
 
     toast("No se pudo cargar la vista.", "danger");
   } finally {
-    state.isRendering = false;
-    setBusy(false);
+    if (generation === renderGeneration) {
+      state.isRendering = false;
+      setBusy(false);
+    }
   }
 }
 

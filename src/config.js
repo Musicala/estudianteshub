@@ -44,7 +44,7 @@ export const APP_META = Object.freeze({
   shortName: "Estudiantes HUB",
   institution: "Musicala",
   version: "1.0.1",
-  build: "2026-10-03.2-login-curriculum",
+  build: "2026-10-31.1-proxima-clase",
   lang: "es-CO",
   defaultRoute: "home",
 });

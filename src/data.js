@@ -1359,6 +1359,9 @@ export async function listBitacorasByStudent(studentId, options = {}) {
       200
     );
 
+    if (options.initialDiagnosisOnly) {
+      return sorted.filter(item => Object.keys(item.metadata?.initialDiagnoses || {}).length || item.metadata?.initialDiagnosis);
+    }
     return sorted.slice(0, max);
   } catch (error) {
     throw withContextError(error, "listBitacorasByStudent");
@@ -2513,8 +2516,10 @@ function cleanResourceMatch(resource, student) {
   if (!studentAreas.length) return true; // sin datos del estudiante -> mostrar
 
   const studentArts = getStudentResourceArts(student);
-  const resourceArt = detectArtFromTerm(disciplina) || disciplina;
-  if (studentArts.size && !studentArts.has(resourceArt)) return false;
+  const resourceDisciplines = resource.tipo === "Juego" && safeArray(resource.disciplinas).length
+    ? safeArray(resource.disciplinas) : [disciplina];
+  const resourceArts = resourceDisciplines.map(value => detectArtFromTerm(value) || normalizeResourceText(value));
+  if (studentArts.size && !resourceArts.some(art => studentArts.has(art))) return false;
 
   const especialidad = normalizeResourceText(resource.especialidad);
   if (CLEAN_GENERAL_ESPECIALIDADES.has(especialidad)) return true;

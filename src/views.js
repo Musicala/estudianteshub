@@ -1,7 +1,4 @@
-function biblioCatalogLabel(value) {
-  const labels = { "por-evaluar": "Por evaluar", todos: "Sin nivel específico", inicial: "Inicial", basico: "Básico", intermedio: "Intermedio", avanzado: "Avanzado", tecnica: "Técnica", metodo: "Método", "material-apoyo": "Material de apoyo", planificacion: "Planificación", "lectura-musical": "Lectura musical", "armonia-y-acordes": "Armonía y acordes", "coordinacion-e-independencia": "Coordinación e independencia", "afinacion-y-oido": "Afinación y oído", "interpretacion-y-ensamble": "Interpretación y ensamble", "cuidado-corporal": "Cuidado corporal", "planeacion-docente": "Planeación docente", "expresion-visual": "Expresión visual", "expresion-corporal": "Expresión corporal", "hoja-de-calculo": "Hoja de cálculo", numeros: "Números", presentacion: "Presentación", pdf: "PDF" };
-  return labels[value] || String(value || "").replaceAll("-", " ").replace(/^./, c => c.toUpperCase());
-}
+import { diagnosisForStudent, renderDiagnosis } from "./initial-diagnosis.js";
 "use strict";
 
 /* =============================================================================
@@ -59,6 +56,7 @@ import {
 } from "./ui.js";
 
 import { callFunction } from "./firebase.js";
+import { mountNextClass } from "./next-class.js";
 import { downloadAiReportPdf, slugifyReportName } from "./ai-report-pdf.js";
 
 import {
@@ -602,6 +600,9 @@ async function renderHome(deps) {
   const resources = normalized.resources || [];
   const events = normalized.events || [];
 
+  const nextClassCard = card({title:"Tu próxima clase",subtitle:"Consulta tu horario y el lugar de tu próxima clase.",bodyHTML:`<section data-next-student="${escapeAttr(studentId)}"><div data-next-body aria-live="polite"><p>Consultando tu próxima clase…</p></div><button type="button" class="btn btn--ghost" data-next-refresh>Actualizar</button></section>`});
+  const mountSchedule = () => mountNextClass(viewRoot()?.querySelector('[data-next-student]'),{studentId,userId:ctx.user?.uid,callFunction});
+
   const lastBitacora = bitacoras[0] || null;
   const nextEvent = events[0] || null;
 
@@ -789,6 +790,7 @@ async function renderHome(deps) {
   if (isGuardian) {
     const sname = getStudentDisplayName(student);
     return {
+      afterRender: mountSchedule,
       html: `
         ${viewHeader(`Seguimiento de ${sname}`, "Panel de acudiente", { eyebrow: "Musicala · Acudientes" })}
         ${stack(`
@@ -798,6 +800,7 @@ async function renderHome(deps) {
             <p class="acudiente-hero__subtitle">${htmlText(studentSubtitle({ student }))}</p>
           </div>
 
+          ${nextClassCard}
           <div class="grid">
             ${card({
               title: "Avance general",
@@ -832,6 +835,7 @@ async function renderHome(deps) {
 
     ${stack(`
       ${heroHTML}
+      ${nextClassCard}
       ${stats}
       ${musiProfeCtaCard()}
       ${badgesCard}
@@ -853,12 +857,13 @@ async function renderHome(deps) {
   return {
     html,
     afterRender: () => {
+      mountSchedule();
       const buttonEl = viewRoot()?.querySelector("[data-action='open-home-bitacora']");
 
       if (!buttonEl || !lastBitacora) return;
 
       buttonEl.addEventListener("click", () => {
-        openBitacoraModal(lastBitacora);
+        openBitacoraModal(lastBitacora, studentId);
       });
     },
   };
@@ -1051,23 +1056,15 @@ async function renderRouteView(deps) {
     "aprendizaje"
   );
 
-  let routes = [];
-
-  if (!usesMapCurriculum && typeof api.getStudentRoutes === "function") {
-    routes = await api.getStudentRoutes(studentId).catch(() => []);
-  } else if (!usesMapCurriculum && typeof api.getStudentRoute === "function") {
-    const route = await api.getStudentRoute(studentId).catch(() => null);
-    routes = route ? [route] : [];
-  }
-
-  routes = normalizeStudentRoutes(routes);
-
-  // Ruta de aprendizaje real (route_templates + student_route_progress),
-  // tal como la define el equipo en "Bitácoras de Clase".
-  let learning = null;
-  if (typeof api.getStudentLearningRoute === "function") {
-    learning = await api.getStudentLearningRoute(student).catch(() => null);
-  }
+  // Ambas lecturas son independientes: no esperar una para comenzar la otra.
+  const routesRequest = usesMapCurriculum ? Promise.resolve([])
+    : typeof api.getStudentRoutes === "function" ? api.getStudentRoutes(studentId).catch(() => [])
+    : typeof api.getStudentRoute === "function" ? api.getStudentRoute(studentId).then((route) => route ? [route] : []).catch(() => [])
+    : Promise.resolve([]);
+  const learningRequest = typeof api.getStudentLearningRoute === "function"
+    ? api.getStudentLearningRoute(student).catch(() => null) : Promise.resolve(null);
+  const [routeResults, learning] = await Promise.all([routesRequest, learningRequest]);
+  const routes = normalizeStudentRoutes(routeResults);
 
   if (learning && learning.totalGoals > 0) {
     return renderLearningRoute(ctx, learning, studentId);
@@ -1319,13 +1316,10 @@ function renderLearningRoute(ctx, learning, studentId) {
     `,
   });
 
-  // Bloques por componente (Corporal / Técnico / Teórico / Obras …).
+  // Los contenidos quedan agrupados y disponibles al instante, sin otra consulta.
   const blocksHTML = learning.blocks.length
-    ? `<div class="grid">${learning.blocks.map((block) => card({
-        title: `${LEARNING_BLOCK_ICONS[block.component] || "○"} ${block.label}`,
-        subtitle: `${block.done}/${block.total} objetivos`,
-        bodyHTML: `<div class="list">${block.goals.map((goal) => learningGoalRow(goal, studentId)).join("")}</div>`,
-      })).join("")}</div>`
+    ? `<section class="learning-path__section"><div class="learning-path__section-head"><h2>Explora tus objetivos</h2><p>Abre cada área para ver y autoevaluar lo que estás aprendiendo.</p></div><div class="learning-path__areas">${learning.blocks.map((block) => `
+        <details class="learning-path__area"><summary><span class="learning-path__area-icon" aria-hidden="true">${LEARNING_BLOCK_ICONS[block.component] || "○"}</span><span><strong>${htmlText(block.label)}</strong><small>${block.done} de ${block.total} objetivos logrados</small></span><span class="learning-path__chevron" aria-hidden="true">⌄</span></summary><div class="learning-path__area-body list">${block.goals.map((goal) => learningGoalRow(goal, studentId)).join("")}</div></details>`).join("")}</div></section>`
     : emptyState("Sin objetivos registrados", "Aún no hay objetivos específicos en esta ruta.", { icon: "○" });
 
   const currentExperienceHTML = currentExperience
@@ -1358,18 +1352,14 @@ function renderLearningRoute(ctx, learning, studentId) {
       })
     : "";
 
-  // Resumen por experiencia.
+  // Una línea de etapas muestra dónde está, sin marcar como lograda una etapa sin avance.
   const experiencesHTML = learning.experiences.length
-    ? card({
-        title: "Tus experiencias",
-        subtitle: "Cómo avanza tu ruta por etapas.",
-        bodyHTML: `<div class="list">${learning.experiences.map((exp) => itemRow({
-          title: exp.label,
-          meta: exp.description || "Etapa de tu proceso de aprendizaje.",
-          side: `${exp.done}/${exp.total}`,
-          icon: exp.done >= exp.total && exp.total > 0 ? "✓" : "◷",
-        })).join("")}</div>`,
-      })
+    ? `<section class="learning-path__section"><div class="learning-path__section-head"><h2>Tu camino</h2><p>Estas son las experiencias de tu proceso.</p></div><div class="learning-path__steps">${learning.experiences.map((exp, index) => {
+        const current = Boolean(exp.isCurrent || (currentExperience && exp === currentExperience));
+        const done = exp.total > 0 && exp.done >= exp.total;
+        const status = current ? "Estás aquí" : done ? "Completada" : exp.done > 0 ? "En progreso" : "Por recorrer";
+        return `<div class="learning-path__step ${current ? "is-current" : done ? "is-done" : ""}" ${current ? 'aria-current="step"' : ""}><span class="learning-path__step-number">${done && !current ? "✓" : index + 1}</span><span class="learning-path__step-copy"><strong>${htmlText(exp.label)}${exp.name ? ` · ${htmlText(exp.name)}` : ""}</strong><small>${htmlText(status)}${exp.total ? ` · ${exp.done}/${exp.total} objetivos` : ""}</small></span></div>`;
+      }).join("")}</div></section>`
     : "";
 
   const html = `
@@ -1384,9 +1374,9 @@ function renderLearningRoute(ctx, learning, studentId) {
 
       ${currentExperienceHTML}
 
-      ${blocksHTML}
-
       ${experiencesHTML}
+
+      ${blocksHTML}
 
       ${card({
         title: "Línea del tiempo",
@@ -1398,7 +1388,13 @@ function renderLearningRoute(ctx, learning, studentId) {
 
   return {
     html,
-    afterRender: () => wireAutoEval(viewRoot(), studentId),
+    afterRender: () => {
+      const root = viewRoot();
+      wireAutoEval(root, studentId);
+      const current = root?.querySelector(".learning-path__step.is-current");
+      const strip = current?.parentElement;
+      if (current && strip) strip.scrollLeft = Math.max(0, current.offsetLeft - strip.offsetLeft - 8);
+    },
   };
 }
 
@@ -1536,7 +1532,7 @@ function bitacoraSectionValueHTML(value = "") {
   return `<p class="bitacora-section__text">${escapeHtml(text)}</p>`;
 }
 
-function renderBitacoraSections(content = "") {
+function renderBitacoraSections(content = "", activityResources = []) {
   const { intro, sections } = parseBitacoraSections(content);
 
   // El docente ya se muestra en la cabecera de la tarjeta.
@@ -1566,7 +1562,7 @@ function renderBitacoraSections(content = "") {
             <span class="bitacora-section__icon">${meta.icon}</span>
             <span class="bitacora-section__label">${escapeHtml(meta.label)}</span>
           </div>
-          <div class="bitacora-section__body">${bitacoraSectionValueHTML(section.value)}</div>
+          <div class="bitacora-section__body">${renderActivityPractice(section.value, key, activityResources)}</div>
         </div>
       `;
     })
@@ -1609,6 +1605,9 @@ async function renderJournal(deps) {
 
   const bitacoras = normalizeBitacoras(rows);
   const processes = normalizeStudentProcesses(student);
+  const initialRecords = typeof api.listBitacorasByStudent === "function"
+    ? await api.listBitacorasByStudent(studentId, { student, initialDiagnosisOnly: true }).catch(logJournalError)
+    : bitacoras;
 
   if (!bitacoras.length) {
     const emptyMessage = journalError
@@ -1741,7 +1740,8 @@ async function renderJournal(deps) {
           }).replace("data-action=\"open-bitacora\"", `data-action="open-bitacora" data-bitacora-id="${escapeAttr(id)}"`)}
         </div>
 
-        ${renderBitacoraSections(content)}
+        ${renderDiagnosis((item.metadata?.initialDiagnoses?.[studentId] || diagnosisForStudent(item.metadata?.initialDiagnosis, studentId)), escapeHtml)}
+        ${renderBitacoraSections(content, item.metadata?.activityResources)}
 
         ${
           item.tags?.length
@@ -1760,6 +1760,7 @@ async function renderJournal(deps) {
 
       ${stack(`
         ${summary}
+        ${initialRecords.filter(item => (item.metadata?.initialDiagnoses?.[studentId] || diagnosisForStudent(item.metadata?.initialDiagnosis, studentId))).map(item => `<div class="card"><p>${escapeHtml(formatDate(item.fechaClase || item.createdAt))} · ${escapeHtml(getProcessLabel(item))}</p>${renderDiagnosis(item.metadata.initialDiagnoses?.[studentId] || item.metadata.initialDiagnosis, escapeHtml)}</div>`).join("")}
 
         ${card({
           title: "Entradas de clase",
@@ -1778,7 +1779,7 @@ async function renderJournal(deps) {
     `,
 
     afterRender: () => {
-      wireBitacoraModals(bitacoras);
+      wireBitacoraModals(bitacoras, studentId);
       wireJournalSearch();
     },
   };
@@ -1855,7 +1856,7 @@ function getBitacoraProcessKeyForStudent(item = {}, student = {}, studentId = ""
   return String(item?.process?.processKey || item?.processKey || "");
 }
 
-function wireBitacoraModals(bitacoras = []) {
+function wireBitacoraModals(bitacoras = [], studentId = "") {
   const root = viewRoot();
   if (!root) return;
 
@@ -1866,12 +1867,12 @@ function wireBitacoraModals(bitacoras = []) {
 
       if (!item) return;
 
-      openBitacoraModal(item);
+      openBitacoraModal(item, studentId);
     });
   });
 }
 
-function openBitacoraModal(item = {}) {
+function openBitacoraModal(item = {}, studentId = "") {
   const title = getBitacoraTitle(item);
   const date = item.fechaClase || item.date || item.createdAt;
   const content = getBitacoraContent(item);
@@ -1919,8 +1920,9 @@ function openBitacoraModal(item = {}) {
       process,
     ]),
     bodyHTML: readBlock(`
+      ${renderDiagnosis((item.metadata?.initialDiagnoses?.[studentId] || diagnosisForStudent(item.metadata?.initialDiagnosis, studentId)), escapeHtml)}
       <h3>Registro de clase</h3>
-      ${renderBitacoraSections(content)}
+      ${renderBitacoraSections(content, item.metadata?.activityResources)}
 
       ${
         homework
@@ -1964,9 +1966,10 @@ async function renderResources(deps) {
     items = await api.listResources({
       student,
       studentId: getStudentId(ctx),
+      max: 1500,
     }).catch(() => []);
   } else if (typeof api.listLibraryPins === "function") {
-    items = await api.listLibraryPins(getStudentId(ctx), null).catch(() => []);
+    items = await api.listLibraryPins(getStudentId(ctx), 1500).catch(() => []);
   }
 
   const resources = normalizeResources(items);
@@ -1991,10 +1994,7 @@ async function renderResources(deps) {
   RES_NAV.tema = null;
   RES_NAV.search = "";
   RES_NAV.tipo = "";
-  RES_NAV.nivel = "";
   RES_NAV.categoria = "";
-  RES_NAV.objetivo = "";
-  RES_NAV.formato = "";
   RES_NAV.shown = 60;
 
   const tipos = [...new Set(
@@ -2008,6 +2008,7 @@ async function renderResources(deps) {
 
     <div class="biblio">
       <div class="biblioToolbar">
+        <button type="button" class="btn btn--ghost" id="biblioGames" aria-pressed="false">🎮 Juegos</button>
         <input
           type="search"
           id="biblioSearch"
@@ -2020,11 +2021,7 @@ async function renderResources(deps) {
           <option value="">Tipo: todos</option>
           ${tipos.map((t) => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join("")}
         </select>
-        <select id="biblio-nivel" class="biblioSelect" aria-label="Dificultad"><option value="">Dificultad: todos</option>${[...new Set(resources.map(r => r.nivel).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
-        <select id="biblio-categoria" class="biblioSelect" aria-label="Categoría"><option value="">Categoría: todos</option>${[...new Set(resources.map(r => r.categoria).filter(Boolean))].sort().map(v => `<option value="${escapeHtml(v)}">${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
-        <select id="biblio-objetivo" class="biblioSelect" aria-label="Objetivo"><option value="">Objetivo: todos</option>${[...new Set(resources.flatMap(r => r.objetivos || []))].sort().map(v => `<option value="${escapeHtml(v)}" >${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
-        <select id="biblio-formato" class="biblioSelect" aria-label="Formato"><option value="">Formato: todos</option>${[...new Set(resources.flatMap(r => r.formatos || []))].sort().map(v => `<option value="${escapeHtml(v)}" >${escapeHtml(biblioCatalogLabel(v))}</option>`).join("")}</select>
-        <button type="button" class="btn btn--ghost" id="biblio-global">Buscar en toda mi biblioteca</button>
+        <select id="biblio-categoria" class="biblioSelect" aria-label="Filtrar por categoría"><option value="">Categoría: todas</option>${[...new Set(resources.map(r => r.categoria).filter(Boolean))].sort().map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value === "juegos" ? "Juegos" : value)}</option>`).join("")}</select>
       </div>
       <nav class="biblioCrumbs" id="biblioCrumbs" aria-label="Ruta de carpetas"></nav>
       <p class="biblioMeta" id="biblioMeta"></p>
@@ -2057,9 +2054,15 @@ function bibNorm(value = "") {
 }
 
 // Arte macro (Música / Danzas / Artes plásticas / Teatro) a partir del área.
+function bibResourceArea(resource = {}) {
+  if (resource.tipo === "Juego") return ({ musica: "Música", danza: "Danzas", teatro: "Teatro", "artes-plasticas": "Artes plásticas", interdisciplinar: "Interdisciplinar" })[resource.disciplina] || resource.area || "General";
+  return resource.area || resource.instrument || resource.instrumento;
+}
+
 function bibMacroArea(areaRaw) {
   const a = bibNorm(areaRaw);
   if (!a) return "General";
+  if (a.includes("interdisciplinar")) return "Interdisciplinar";
   if (/(sala de profesores|vacacional)/.test(a)) return "General";
   if (/(ballet|danza|baile)/.test(a)) return "Danzas";
   if (/(dibujo|pintura|escultura|plastic|manualidad|ceramica)/.test(a)) return "Artes plásticas";
@@ -2128,9 +2131,10 @@ function bibResourceLinks(resource = {}) {
 }
 
 function renderBiblioCard(resource = {}) {
-  const area = uiSafeText(resource.area || resource.instrument || resource.instrumento) || "general";
+  const area = uiSafeText(bibResourceArea(resource)) || "general";
   const tema = uiSafeText(resource.tema);
   const tipo = uiSafeText(resource.tipo || resource.type);
+  const game = tipo === "Juego" ? resource.juego : null;
   const desc = uiSafeText(resource.description || resource.descripcion);
   const tags = safeArray(resource.tags || resource.etiquetas).map((t) => uiSafeText(t)).filter(Boolean);
   const hue = bibHue(area);
@@ -2146,7 +2150,7 @@ function renderBiblioCard(resource = {}) {
             <span class="biblioLinkKind">${escapeHtml(kind)}</span>
             <span class="biblioLinkName">${escapeHtml(label)}</span>
           </span>
-          <span class="biblioLinkOpen">Abrir ↗</span>
+          <span class="biblioLinkOpen">${tipo === "Juego" ? "Jugar" : "Abrir"} ↗</span>
         </a>
       `;
     })
@@ -2157,12 +2161,12 @@ function renderBiblioCard(resource = {}) {
       <div class="biblioCardTop">
         <span class="biblioArea">${bibEmoji(area)} ${escapeHtml(area)}</span>
         ${tipo ? `<span class="biblioTipo">${escapeHtml(tipo)}</span>` : ""}
-        ${resource.nivel ? `<span class="biblioTipo">${escapeHtml(biblioCatalogLabel(resource.nivel))}</span>` : ""}
       </div>
       <h3 class="biblioTitle">${escapeHtml(uiSafeText(resource.title || resource.titulo) || "Sin título")}</h3>
       ${tema ? `<p class="biblioTema">📂 ${escapeHtml(tema)}</p>` : ""}
       ${desc ? `<p class="biblioDesc">${escapeHtml(desc.slice(0, 220))}</p>` : ""}
       ${tags.length ? `<div class="biblioTags">${tags.slice(0, 6).map((t) => `<span>${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+      ${game ? `<div class="biblioGameMeta">${[game.habilidad, game.nivelOriginal, game.edadSugerida ? `Edad sugerida: ${game.edadSugerida}` : ""].filter(Boolean).map(value => `<span>${escapeHtml(value)}</span>`).join("")}</div>${game.instrucciones ? `<details class="biblioGameHelp"><summary>Cómo jugar</summary><p>${escapeHtml(game.instrucciones)}</p>${game.objetivo ? `<p><strong>Objetivo:</strong> ${escapeHtml(game.objetivo)}</p>` : ""}</details>` : ""}` : ""}
       ${linksHTML ? `<div class="biblioLinks">${linksHTML}</div>` : ""}
     </article>
   `;
@@ -2172,6 +2176,7 @@ function wireBiblioteca(resources) {
   const root = viewRoot();
   if (!root) return;
 
+  const gamesButton = root.querySelector("#biblioGames");
   const grid = root.querySelector("#biblioGrid");
   const crumbs = root.querySelector("#biblioCrumbs");
   const meta = root.querySelector("#biblioMeta");
@@ -2183,8 +2188,8 @@ function wireBiblioteca(resources) {
   // Agrupación arte → área → tema → recursos.
   const byArte = new Map();
   for (const r of resources) {
-    const arte = bibMacroArea(r.area || r.instrument || r.instrumento);
-    const area = uiSafeText(r.area || r.instrument || r.instrumento) || "General";
+    const arte = bibMacroArea(bibResourceArea(r));
+    const area = uiSafeText(bibResourceArea(r)) || "General";
     const tema = uiSafeText(r.tema) || "Sin tema";
     if (!byArte.has(arte)) byArte.set(arte, new Map());
     const byArea = byArte.get(arte);
@@ -2259,7 +2264,7 @@ function wireBiblioteca(resources) {
   };
 
   const paintRecursos = (lista) => {
-    const filtered = lista.filter(r => (!RES_NAV.tipo || String(r.tipo || r.type || "").trim() === RES_NAV.tipo) && (!RES_NAV.nivel || r.nivel === RES_NAV.nivel) && (!RES_NAV.categoria || r.categoria === RES_NAV.categoria) && (!RES_NAV.objetivo || (r.objetivos || []).includes(RES_NAV.objetivo)) && (!RES_NAV.formato || (r.formatos || []).includes(RES_NAV.formato)));
+    const filtered = lista.filter(r => (!RES_NAV.tipo || uiSafeText(r.tipo || r.type) === RES_NAV.tipo) && (!RES_NAV.categoria || r.categoria === RES_NAV.categoria));
     if (!filtered.length) {
       grid.classList.remove("biblioGridFolders");
       grid.innerHTML = `<div class="biblioEmpty"><h2>Sin resultados</h2><p>Prueba con otra búsqueda o quita los filtros.</p></div>`;
@@ -2274,6 +2279,7 @@ function wireBiblioteca(resources) {
 
   const paint = () => {
     paintCrumbs();
+    gamesButton?.setAttribute("aria-pressed", String(RES_NAV.tipo === "Juego"));
 
     const scopeLabel = RES_NAV.tema || RES_NAV.area || RES_NAV.arte;
     if (searchInput) {
@@ -2281,18 +2287,18 @@ function wireBiblioteca(resources) {
     }
 
     const term = bibNorm(RES_NAV.search);
-    if (term || RES_NAV.nivel || RES_NAV.categoria || RES_NAV.tipo || RES_NAV.objetivo || RES_NAV.formato) {
+    if (term || RES_NAV.tipo || RES_NAV.categoria) {
       let source = resources;
-      if (RES_NAV.arte) source = source.filter((r) => bibMacroArea(r.area || r.instrument || r.instrumento) === RES_NAV.arte);
-      if (RES_NAV.area) source = source.filter((r) => (uiSafeText(r.area || r.instrument || r.instrumento) || "General") === RES_NAV.area);
+      if (RES_NAV.arte) source = source.filter((r) => bibMacroArea(bibResourceArea(r)) === RES_NAV.arte);
+      if (RES_NAV.area) source = source.filter((r) => (uiSafeText(bibResourceArea(r)) || "General") === RES_NAV.area);
       if (RES_NAV.tema) source = source.filter((r) => (uiSafeText(r.tema) || "Sin tema") === RES_NAV.tema);
 
       const matches = source.filter((r) => {
         const hay = bibNorm([
-          r.title, r.titulo, r.tema, r.area, r.tipo, r.type, r.description, r.descripcion, r.nivel, r.categoria, r.especialidad, r.cancion?.artista, r.cancion?.genero, r.cancion?.tonalidad,
-          ...safeArray(r.tags || r.etiquetas), ...(r.objetivos || []), ...(r.formatos || []),
+          r.title, r.titulo, r.tema, r.area, r.tipo, r.type, r.description, r.descripcion,
+          ...safeArray(r.tags || r.etiquetas),
         ].filter(Boolean).join(" "));
-        return term.split(/\s+/).filter(Boolean).every(token => hay.includes(token));
+        return hay.includes(term);
       });
       const n = paintRecursos(matches);
       if (meta) meta.textContent = `${n} resultado(s)${scopeLabel ? ` en ${scopeLabel}` : ""}`;
@@ -2346,15 +2352,18 @@ function wireBiblioteca(resources) {
     });
   };
 
+  gamesButton?.addEventListener("click", () => {
+    RES_NAV.tipo = RES_NAV.tipo === "Juego" ? "" : "Juego";
+    RES_NAV.arte = null; RES_NAV.area = null; RES_NAV.tema = null; RES_NAV.categoria = ""; RES_NAV.shown = 60;
+    if (tipoSelect) tipoSelect.value = RES_NAV.tipo;
+    const categorySelect = root.querySelector("#biblio-categoria"); if (categorySelect) categorySelect.value = "";
+    paint();
+  });
   searchInput?.addEventListener("input", (e) => {
     RES_NAV.search = e.target.value;
     RES_NAV.shown = 60;
     paint();
   });
-  root.querySelector("#biblio-objetivo")?.addEventListener("change", e => { RES_NAV.objetivo = e.target.value; RES_NAV.shown = 60; paint(); });
-  root.querySelector("#biblio-formato")?.addEventListener("change", e => { RES_NAV.formato = e.target.value; RES_NAV.shown = 60; paint(); });
-  root.querySelector("#biblio-global")?.addEventListener("click", () => { RES_NAV.arte = null; RES_NAV.area = null; RES_NAV.tema = null; RES_NAV.shown = 60; paint(); });
-  root.querySelector("#biblio-nivel")?.addEventListener("change", e => { RES_NAV.nivel = e.target.value; RES_NAV.shown = 60; paint(); });
   root.querySelector("#biblio-categoria")?.addEventListener("change", e => { RES_NAV.categoria = e.target.value; RES_NAV.shown = 60; paint(); });
   tipoSelect?.addEventListener("change", (e) => {
     RES_NAV.tipo = e.target.value;
@@ -4311,6 +4320,7 @@ function normalizedWorks(student = {}) {
   return (Array.isArray(raw) ? raw : [raw]).map((item) => ({
     nombre: uiSafeText(typeof item === "object" ? item.nombre || item.name || item.title : item),
     estado: uiSafeText(item?.estado || item?.status || "proceso").toLowerCase(),
+    processKey: uiSafeText(item?.processKey || item?.process?.processKey),
   })).filter((item) => item.nombre);
 }
 
@@ -4324,21 +4334,38 @@ async function renderWorks(deps) {
   const columns = [
     ["quiere", "Quiero trabajar"], ["proceso", "Estoy trabajando"], ["lograda", "Lograda"],
   ];
-  const columnHtml = columns.map(([key, label]) => {
-    const items = works.filter((item) => item.estado === key);
+  const processes = normalizeStudentProcesses(student);
+  const initialProcess = processes[0]?.processKey || "";
+  const processKeys = new Set(processes.map(process => process.processKey));
+  const renderColumns = processKey => columns.map(([key, label]) => {
+    const items = works.filter(item => item.estado === key &&
+      (processKey ? item.processKey === processKey : !processKeys.has(item.processKey))
+    );
     return `<section class="card card--flat"><h3>${label} <span class="chip chip--soft">${items.length}</span></h3>${items.length ? `<div class="list">${items.map((item) => itemRow({ title: item.nombre, icon: "♪" })).join("")}</div>` : `<p class="note">Aún no hay obras en esta etapa.</p>`}</section>`;
   }).join("");
   const html = `${viewHeader("Obras del proceso", studentSubtitle(ctx), { eyebrow: "Mi proceso" })}${stack(`
     <p class="note">Aquí ves las obras acordadas con tu docente. Puedes sugerir una nueva para que la revise antes de incorporarla al proceso.</p>
-    <div class="grid">${columnHtml}</div>
+    <label for="worksProcess">Proceso de las obras</label>
+    <select id="worksProcess" class="journal-search__select">
+      ${processes.map(process => `<option value="${escapeAttr(process.processKey)}">${escapeHtml(process.label || process.detalle || process.arte || "Proceso")}</option>`).join("")}
+      <option value="">Sin proceso asignado</option>
+    </select>
+    <div id="worksColumns" class="grid" aria-live="polite">${renderColumns(initialProcess)}</div>
     ${card({ title: "Sugeridas por mí", subtitle: "Propón una obra y tu docente la revisará antes de sumarla al proceso.", bodyHTML: suggestions.length ? `<div class="list">${suggestions.map((item) => itemRow({ title: uiSafeText(item.nombre), meta: item.estado === "pendiente" ? "Pendiente de revisión" : uiSafeText(item.estado), icon: "✦" })).join("")}</div>` : `<div class="work-suggestion__empty"><span class="work-suggestion__empty-icon" aria-hidden="true">♪</span><div><strong>Aún no tienes propuestas</strong><p>Comparte una obra que te emocione trabajar.</p></div></div>`, footerHTML: `<div class="work-suggestion"><div class="work-suggestion__intro"><span class="work-suggestion__eyebrow">Nueva propuesta</span><p>Con una breve razón ayudarás a tu docente a conocer mejor tu idea.</p></div><div class="work-suggestion__fields"><label class="work-suggestion__field" for="workSuggestionName"><span>Obra que quieres sugerir</span><input id="workSuggestionName" maxlength="300" placeholder="Ej. Viva la vida — Coldplay"/></label><label class="work-suggestion__field" for="workSuggestionNotes"><span>¿Por qué te interesa? <em>Opcional</em></span><textarea id="workSuggestionNotes" rows="3" maxlength="1000" placeholder="Cuéntanos qué te gusta de esta obra o qué te gustaría aprender."></textarea></label></div><div class="work-suggestion__actions"><p>Tu propuesta quedará pendiente de revisión.</p><button type="button" id="workSuggestionSave" class="btn btn--primary"><span aria-hidden="true">✦</span>Sugerir obra</button></div></div>` })}
   `)}`;
-  return { html, afterRender: () => document.getElementById("workSuggestionSave")?.addEventListener("click", async () => {
+  return { html, afterRender: () => {
+    const selector = document.getElementById("worksProcess");
+    const columnsRoot = document.getElementById("worksColumns");
+    selector?.addEventListener("change", () => {
+      if (columnsRoot) columnsRoot.innerHTML = renderColumns(selector.value);
+    });
+    document.getElementById("workSuggestionSave")?.addEventListener("click", async () => {
     const button = document.getElementById("workSuggestionSave");
     try { button.disabled = true; await api.createStudentWorkSuggestion(studentId, student, { nombre: document.getElementById("workSuggestionName")?.value, notas: document.getElementById("workSuggestionNotes")?.value }); window.location.hash = "#/works"; }
     catch (error) { window.alert(error?.message || "No se pudo enviar la sugerencia."); }
     finally { button.disabled = false; }
-  }) };
+    });
+  } };
 }
 
 /* =============================================================================
@@ -4350,7 +4377,7 @@ const DIAGNOSTIC_FORMS = Object.freeze({
 });
 function diagnosticFormHTML(type, form) { return `<form class="diagnostic-form" data-diagnostic-form="${type}">${form.questions.map(([key, label, placeholder, kind]) => { const required = kind === "optional" ? "" : "required"; const control = kind === "textarea" ? `<textarea name="${key}" rows="4" maxlength="4000" placeholder="${escapeAttr(placeholder)}" ${required}></textarea>` : `<input name="${key}" maxlength="4000" placeholder="${escapeAttr(placeholder)}" ${required} />`; return `<label class="diagnostic-field"><span>${htmlText(label)}${required ? " <em>*</em>" : ""}</span>${control}</label>`; }).join("")}<p class="note">Al enviar, tus respuestas quedan guardadas en tu proceso y no podrás modificarlas. Tu docente y el equipo Musicala sí podrán consultarlas.</p><button class="btn btn--primary" type="submit">Enviar diagnóstico una sola vez</button></form>`; }
 function diagnosticAnswerRows(diagnostic, form) { return form.questions.map(([key, question]) => { const answer = safeText(diagnostic?.answers?.[key], "Sin respuesta registrada."); const value = /^https?:\/\//i.test(answer) ? `<a href="${escapeAttr(answer)}" target="_blank" rel="noopener noreferrer">Abrir evidencia ↗</a>` : htmlText(answer); return `<div class="diagnostic-answer"><strong>${htmlText(question)}</strong><div>${value}</div></div>`; }).join(""); }
-async function renderDiagnostics(deps) { const ctx = getCtx(deps); const api = getApi(deps); const student = getStudent(ctx); const studentId = getStudentIdentity(student) || getStudentId(ctx); const diagnostics = await api.getStudentDiagnostics(studentId).catch(() => ({ theory: null, practice: null })); const cards = ["theory", "practice"].map((type) => { const form = DIAGNOSTIC_FORMS[type]; const completed = diagnostics[type]; return card({ title: form.title, subtitle: completed ? `Completado el ${formatDate(completed.createdAt)}. Estas son las respuestas registradas.` : form.subtitle, bodyHTML: completed ? `<div class="diagnostic-complete">✓ Completado una sola vez</div><div class="diagnostic-answers">${diagnosticAnswerRows(completed, form)}</div>` : diagnosticFormHTML(type, form) }); }).join(""); return { html: `${viewHeader("Diagnósticos iniciales", studentSubtitle(ctx), { eyebrow: "Punto de partida" })}${stack(`<p class="note">Completa el diagnóstico teórico y el práctico una sola vez. Tus respuestas quedan disponibles para tu proceso y para el equipo pedagógico.</p>${cards}`)}`, afterRender: () => document.querySelectorAll("[data-diagnostic-form]").forEach((form) => form.addEventListener("submit", async (event) => { event.preventDefault(); const submit = form.querySelector("button[type='submit']"); try { submit.disabled = true; await api.createStudentDiagnostic(studentId, student, form.getAttribute("data-diagnostic-form"), Object.fromEntries(new FormData(form).entries())); window.location.hash = "#/diagnostics"; } catch (error) { window.alert(error?.message || "No se pudo guardar el diagnóstico. Intenta de nuevo."); } finally { submit.disabled = false; } })) }; }
+async function renderDiagnostics(deps) { const ctx = getCtx(deps); const api = getApi(deps); const student = getStudent(ctx); const studentId = getStudentIdentity(student) || getStudentId(ctx); const diagnostics = await api.getStudentDiagnostics(studentId).catch(() => ({ theory: null, practice: null })); const teacherRecords = await api.listBitacorasByStudent(studentId, { student, initialDiagnosisOnly: true }); const teacherHTML = teacherRecords.map(item => { const diagnosis = item.metadata?.initialDiagnoses?.[studentId] || diagnosisForStudent(item.metadata?.initialDiagnosis, studentId); return diagnosis ? card({ title: "Diagnóstico del docente", subtitle: `${formatDate(item.fechaClase)} · ${getAuthorName(item)}`, bodyHTML: renderDiagnosis(diagnosis, escapeHtml) }) : ""; }).join(""); const cards = ["theory", "practice"].map((type) => { const form = DIAGNOSTIC_FORMS[type]; const completed = diagnostics[type]; return card({ title: form.title, subtitle: completed ? `Completado el ${formatDate(completed.createdAt)}. Estas son las respuestas registradas.` : form.subtitle, bodyHTML: completed ? `<div class="diagnostic-complete">✓ Completado una sola vez</div><div class="diagnostic-answers">${diagnosticAnswerRows(completed, form)}</div>` : diagnosticFormHTML(type, form) }); }).join(""); return { html: `${viewHeader("Diagnósticos iniciales", studentSubtitle(ctx), { eyebrow: "Punto de partida" })}${stack(`<p class="note">Completa el diagnóstico teórico y el práctico una sola vez. Tus respuestas quedan disponibles para tu proceso y para el equipo pedagógico.</p>${teacherHTML}${cards}`)}`, afterRender: () => document.querySelectorAll("[data-diagnostic-form]").forEach((form) => form.addEventListener("submit", async (event) => { event.preventDefault(); const submit = form.querySelector("button[type='submit']"); try { submit.disabled = true; await api.createStudentDiagnostic(studentId, student, form.getAttribute("data-diagnostic-form"), Object.fromEntries(new FormData(form).entries())); window.location.hash = "#/diagnostics"; } catch (error) { window.alert(error?.message || "No se pudo guardar el diagnóstico. Intenta de nuevo."); } finally { submit.disabled = false; } })) }; }
 
 /* =============================================================================
   Public API
@@ -4436,3 +4463,16 @@ export async function renderRoute(route, deps = {}) {
 export default {
   renderRoute,
 };
+
+function renderActivityPractice(value, sectionKey, resources = []) {
+  const component = { corporal: 'componenteCorporal', tecnico: 'componenteTecnico', teorico: 'componenteTeorico', obras: 'componenteObras' }[sectionKey];
+  const links = (Array.isArray(resources) ? resources : []).filter(link => link.component === component);
+  if (!links.length) return bitacoraSectionValueHTML(value);
+  const activities = String(value || '').split(/\n/).map(item => item.trim().replace(/^[-•]\s*/, '')).filter(Boolean);
+  return activities.map(activity => {
+    const resource = links.find(link => link.activity === activity);
+    if (!resource) return `<p class="bitacora-section__text">${escapeHtml(activity)}</p>`;
+    const urls = (Array.isArray(resource.links) ? resource.links : []).filter(link => { try { return ['http:', 'https:'].includes(new URL(link.url).protocol); } catch { return false; } });
+    return `<div class="practice-activity"><p class="bitacora-section__text">${escapeHtml(activity)}</p><aside class="practice-resource" aria-label="Recurso para practicar"><span class="practice-resource__eyebrow">📚 Tu material para practicar</span><strong>${escapeHtml(resource.title || 'Recurso de la Biblioteca')}</strong>${resource.note ? `<p>${escapeHtml(resource.note)}</p>` : ''}<div class="practice-resource__links">${urls.length ? urls.map(link => `<a href="${escapeAttr(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.title || 'Abrir material')} ↗</a>`).join('') : '<span>Consulta este material con tu docente.</span>'}</div></aside></div>`;
+  }).join('');
+}
